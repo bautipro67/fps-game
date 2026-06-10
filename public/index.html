@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>FPS Arena — Multijugador</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/css/style.css" />
+<!-- PWA: instalable como app -->
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#0b0e14" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="FPS Arena" />
+<link rel="apple-touch-icon" href="/icons/icon-192.png" />
+<link rel="icon" href="/icons/icon-192.png" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+  <div id="game"></div>
+
+  <!-- Mira -->
+  <div id="crosshair" class="hidden">
+    <span></span><span></span><span></span><span></span>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="hud-bottom-left">
+      <div id="health-wrap">
+        <div id="health-bar"></div>
+        <span id="health-text">200</span>
+      </div>
+    </div>
+    <div id="hud-bottom-right">
+      <div id="weapon-name">Pistola</div>
+      <div id="ammo"><span id="ammo-cur">12</span><span id="ammo-sep">/</span><span id="ammo-res">96</span></div>
+      <div id="reload-msg" class="hidden">RECARGANDO…</div>
+    </div>
+    <div id="hud-top">
+      <div id="timer">5:00</div>
+      <div id="score-box">Puntos: <span id="score">0</span></div>
+      <div id="streak-box" class="hidden">🔥 <span id="streak">0</span></div>
+    </div>
+    <div id="perf-hud"></div>
+    <div id="hitmarker" class="hidden">✕</div>
+    <div id="damage-flash"></div>
+    <div id="dmg-dir"><div class="arc"></div></div>
+    <div id="reload-ring" class="hidden"></div>
+    <div id="toast"></div>
+    <div id="protect-indicator" class="hidden">🛡 INMUNE <span id="protect-time"></span></div>
+    <div id="boost-indicator" class="hidden">⚡ DAÑO x2 <span id="boost-time"></span></div>
+    <div id="shield-vignette"></div>
+    <div id="aim-vignette"></div>
+    <div id="lowhp-vignette"></div>
+    <div id="killfeed"></div>
+    <div id="kill-popup"></div>
+    <div id="multi-popup"></div>
+    <div id="heal-flash"></div>
+    <canvas id="minimap" width="160" height="160"></canvas>
+  </div>
+
+  <!-- Capa de números de daño (proyectados sobre los enemigos) -->
+  <div id="dmg-layer"></div>
+
+  <!-- Controles táctiles (móvil) -->
+  <div id="touch-controls" class="hidden">
+    <div id="joystick"><div id="joy-knob"></div></div>
+    <div id="touch-buttons">
+      <button id="btn-aim" class="tbtn">MIRA</button>
+      <button id="btn-fire" class="tbtn fire">DISPARO</button>
+      <button id="btn-reload" class="tbtn small">⟳</button>
+      <button id="btn-jump" class="tbtn small">⤒</button>
+      <button id="btn-crouch" class="tbtn small">▼</button>
+      <button id="btn-pickup" class="tbtn small">E</button>
+    </div>
+  </div>
+  <button id="btn-menu" class="hidden">☰</button>
+
+  <!-- Menú in-game: sensibilidad y volver al lobby -->
+  <div id="ingame-menu" class="hidden">
+    <div class="imcard">
+      <h2>MENÚ</h2>
+      <label class="sens-row">
+        <span>Sensibilidad de cámara</span>
+        <span class="sens-ctl"><input id="sens-range" type="range" min="0.2" max="3" step="0.1" /> <b id="sens-val">1.0</b></span>
+      </label>
+      <button id="im-resume" class="im-btn primary">Continuar</button>
+      <button id="im-lobby" class="im-btn">Volver al lobby</button>
+    </div>
+  </div>
+
+  <!-- Mira de francotirador (sniper) -->
+  <div id="scope">
+    <div class="lens"></div>
+    <div class="cross v"></div>
+    <div class="cross h"></div>
+    <div class="dot"></div>
+  </div>
+
+  <!-- Marcador (Tab) -->
+  <div id="scoreboard" class="hidden">
+    <h2>MARCADOR</h2>
+    <table>
+      <thead><tr><th>#</th><th>Jugador</th><th>Puntos</th><th>Bajas</th><th>Muertes</th></tr></thead>
+      <tbody id="scoreboard-body"></tbody>
+    </table>
+    <p class="hint">Mantén <b>TAB</b> para ver el marcador</p>
+  </div>
+
+  <!-- Pantalla de muerte -->
+  <div id="death-screen" class="overlay hidden">
+    <div class="death-card">
+      <h1>ELIMINADO</h1>
+      <p>Te eliminó <span id="killer-name">—</span></p>
+      <p class="respawn-text">Reapareciendo en <span id="respawn-count">3.0</span>s…</p>
+    </div>
+  </div>
+
+  <!-- Fin de partida -->
+  <div id="gameover-screen" class="overlay hidden">
+    <div class="gameover-card">
+      <h1>FIN DE LA PARTIDA</h1>
+      <div id="winner"></div>
+      <table>
+        <thead><tr><th>#</th><th>Jugador</th><th>Puntos</th><th>Bajas</th><th>Muertes</th></tr></thead>
+        <tbody id="final-body"></tbody>
+      </table>
+      <p class="hint">Nueva partida en breve…</p>
+    </div>
+  </div>
+
+  <!-- Menú de inicio: elegir arma -->
+  <div id="menu" class="overlay">
+    <div class="menu-card">
+      <h1>FPS <span>ARENA</span></h1>
+      <p class="subtitle">Multijugador · Bots IA · 5 minutos</p>
+      <p class="online-row">● <span id="online-count">0</span> jugadores en línea</p>
+      <label class="field">
+        <span>Tu nombre</span>
+        <input id="name-input" maxlength="16" placeholder="Jugador" autocomplete="off" />
+      </label>
+      <p class="choose">Elige tu arma inicial</p>
+      <div id="weapon-choices"></div>
+      <button id="play-btn" disabled>ELEGÍ UN ARMA</button>
+      <div class="controls-help">
+        <b>WASD</b> moverse · <b>Shift</b> correr · <b>C</b> agacharse · <b>Ratón</b> mirar · <b>Clic izq.</b> disparar · <b>Clic der.</b> apuntar ·
+        <b>Espacio</b> saltar · <b>R</b> recargar · <b>E</b> recoger arma · <b>TAB</b> marcador · <b>M</b> silenciar
+      </div>
+    </div>
+  </div>
+
+  <div id="prompt-pickup" class="hidden">Pulsa <b>E</b> para recoger <span id="pickup-name"></span></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="module" src="/js/main.js"></script>
+  <script>
+    // Registrar el service worker (solo funciona en contexto seguro: https o localhost)
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+  </script>
+</body>
+</html>

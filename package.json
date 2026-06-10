@@ -1,0 +1,30 @@
+{
+  "name": "fps-arena",
+  "version": "1.0.0",
+  "description": "FPS multijugador online con bots IA. Web, PWA instalable y app de escritorio (Electron).",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "icons": "node scripts/gen-icons.mjs",
+    "app": "electron electron/main.cjs",
+    "dist": "electron-builder --win"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.fpsarena.game",
+    "productName": "FPS Arena",
+    "asar": false,
+    "directories": { "output": "dist", "buildResources": "build" },
+    "win": { "target": ["dir"], "icon": "build/icon.png" }
+  }
+}

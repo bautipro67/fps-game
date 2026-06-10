@@ -1,0 +1,11 @@
+# Configuración de deploy para Render (https://render.com)
+# Render lee este archivo y crea el servicio automáticamente.
+services:
+  - type: web
+    name: fps-arena
+    env: node
+    plan: free
+    # --omit=dev: NO instala Electron en el server (solo express + socket.io)
+    buildCommand: npm install --omit=dev
+    startCommand: node server.js
+    autoDeploy: true
