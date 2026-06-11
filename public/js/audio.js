@@ -218,6 +218,11 @@ function synth(name, dest) {
       tone('triangle', 160, 110, t + 0.1, 0.1, 0.35, dest);
       return;
     }
+    case 'slide': { // barrida: deslizada por el suelo (whoosh descendente)
+      noiseBurst(t, 0.55, 0.4, dest, { type: 'lowpass', f0: 2600, f1: 350, q: 1 });
+      tone('sine', 220, 90, t, 0.4, 0.18, dest);
+      return;
+    }
   }
 }
 
@@ -248,7 +253,7 @@ function reverbAmount(name) {
   }
   return ({ death: 0.5, spawn: 0.32, pickup: 0.16, reload: 0.12, hit: 0.12, damaged: 0.18,
     kill: 0.3, step: 0.05, land: 0.16, jump: 0.08, empty: 0.05, beep: 0.04, beepEnd: 0.25, ui: 0.04,
-    headshot: 0.18, heal: 0.2, multi: 0.22, boost: 0.2, power: 0.35, ammo: 0.1 })[name] ?? 0.2;
+    headshot: 0.18, heal: 0.2, multi: 0.22, boost: 0.2, power: 0.35, ammo: 0.1, slide: 0.15 })[name] ?? 0.2;
 }
 
 // Reanuda el contexto si quedó suspendido/interrumpido (clave para que no se corte)

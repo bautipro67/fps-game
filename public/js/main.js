@@ -39,6 +39,7 @@ const tracers = [];
 const local = {
   x: 0, z: 0, feetY: 0, velY: 0, onGround: true, eye: 1.7,
   weapon: 'pistol', ammo: 12, reserve: 96, lastShot: 0, reloading: false,
+  sliding: false, slideTime: 0, slideSpeed: 0, slideDirX: 0, slideDirZ: 0,
 };
 const keys = { w: false, a: false, s: false, d: false, space: false, shift: false, crouch: false };
 let firing = false;
@@ -64,7 +65,7 @@ const raycaster = new THREE.Raycaster();
 let muzzle = null, muzzleLight = null, muzzleT = 0;
 const sparks = [];
 let fireSpread = 0, stepAcc = 0, bobPhase = 0, miniAcc = 0, prevTimeSec = 999;
-let isMoving = false, sprintActive = false;
+let isMoving = false, sprintActive = false, prevCrouch = false, prevSprint = false;
 
 // --- optimización: cache de DOM, temporales reutilizables, pool de luces ---
 const _dom = {};
@@ -127,6 +128,7 @@ socket.on('state', (s) => {
 
 socket.on('respawn', (d) => {
   local.x = d.x; local.z = d.z; local.feetY = 0; local.velY = 0;
+  local.sliding = false;
   setWeapon(d.weapon, true);
   protectStart = 0;
   hideDeath();
@@ -568,7 +570,7 @@ function updateAim(dt) {
   const canAim = aiming && selfAlive && inputOn;
   const isSniper = local.weapon === 'sniper';
   const scoped = canAim && isSniper;                 // sniper: mira de pantalla con zoom fuerte
-  const targetFov = canAim ? (isSniper ? 28 : 55) : (sprintActive ? baseFov + 8 : baseFov);
+  const targetFov = canAim ? (isSniper ? 28 : 55) : (local.sliding ? baseFov + 14 : sprintActive ? baseFov + 8 : baseFov);
   if (Math.abs(camera.fov - targetFov) > 0.05) {
     camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 12);
     camera.updateProjectionMatrix();
@@ -1298,9 +1300,34 @@ function updatePlayer(dt) {
   isMoving = _mv.lengthSq() > 0.0001;
   const touchMag = Math.hypot(touchMove.x, touchMove.y);
   const crouching = keys.crouch && local.onGround && inputOn;
-  sprintActive = inputOn && isMoving && !crouching && !aiming && ((keys.shift && keys.w) || (touchMag > 0.92 && touchMove.y > 0.4));
-  const speed = (aiming && inputOn) ? 4.8 : crouching ? 4.3 : sprintActive ? 12 : 8.5;
-  if (isMoving) _mv.normalize();
+  const sprintIntent = inputOn && isMoving && !aiming && ((keys.shift && keys.w) || (touchMag > 0.92 && touchMove.y > 0.4));
+  sprintActive = sprintIntent && !crouching;
+
+  // --- barrida / slide: venías corriendo y te agachás → deslizada con impulso ---
+  const crouchPressed = keys.crouch && !prevCrouch;
+  prevCrouch = keys.crouch;
+  if (crouchPressed && prevSprint && local.onGround && !local.sliding) {
+    local.sliding = true; local.slideTime = 0; local.slideSpeed = 17;
+    local.slideDirX = _fwd.x; local.slideDirZ = _fwd.z; // dirección fija de la barrida
+    sfx.playLocal('slide', 0.7);
+  }
+  let speed, sliding = false;
+  if (local.sliding) {
+    local.slideTime += dt;
+    local.slideSpeed -= dt * 16;                          // va frenando
+    if (local.slideSpeed <= 5.5 || !keys.crouch || local.slideTime > 0.9 || !local.onGround || !inputOn) {
+      local.sliding = false;                              // fin de la barrida
+    } else {
+      sliding = true; isMoving = true;
+      _mv.set(local.slideDirX, 0, local.slideDirZ);
+      speed = local.slideSpeed;
+    }
+  }
+  if (!sliding) {
+    speed = (aiming && inputOn) ? 4.8 : crouching ? 4.3 : sprintActive ? 12 : 8.5;
+    if (isMoving) _mv.normalize();
+  }
+  prevSprint = sprintActive;
   local.x += _mv.x * speed * dt;
   local.z += _mv.z * speed * dt;
 
@@ -1318,7 +1345,7 @@ function updatePlayer(dt) {
     if (!wasOnGround) { landed = true; impact = -local.velY; }
     local.feetY = groundH; local.velY = 0; local.onGround = true;
   } else local.onGround = false;
-  if (keys.space && local.onGround && !crouching && inputOn) { local.velY = 9; local.onGround = false; sfx.playLocal('jump', 0.5); }
+  if (keys.space && local.onGround && inputOn && (!crouching || local.sliding)) { local.velY = 9; local.onGround = false; local.sliding = false; sfx.playLocal('jump', 0.5); }
   // plataformas de salto: gran impulso (alcanza para subir a los techos)
   if (local.onGround && local.feetY === 0 && inputOn) {
     for (const pad of jumpPads) {
@@ -1327,7 +1354,7 @@ function updatePlayer(dt) {
   }
 
   // altura de cámara: agachado más bajo (interpolado)
-  const targetEye = crouching ? 1.15 : EYE;
+  const targetEye = sliding ? 0.8 : crouching ? 1.15 : EYE; // en barrida, más bajo aún
   local.eye = (local.eye || EYE) + (targetEye - (local.eye || EYE)) * Math.min(1, dt * 12);
   camera.position.set(local.x, local.feetY + local.eye, local.z);
 
@@ -1623,7 +1650,7 @@ function setSensitivity(v) {
 }
 
 function returnToLobby() {
-  joined = false; menuOpen = false; firing = false; aiming = false; keys.crouch = false; boostUntil = 0;
+  joined = false; menuOpen = false; firing = false; aiming = false; keys.crouch = false; boostUntil = 0; local.sliding = false;
   touchMove.x = 0; touchMove.y = 0;
   if (controls && pointerLocked) controls.unlock();
   for (const id of ['hud', 'crosshair', 'ingame-menu', 'scoreboard', 'death-screen', 'gameover-screen', 'touch-controls', 'btn-menu'])
