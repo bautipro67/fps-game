@@ -113,8 +113,8 @@ socket.on('init', (data) => {
 
 socket.on('state', (s) => {
   latest = s;
-  const oc = D('online-count');
-  if (oc) oc.textContent = s.players.length;
+  const oc = D('online-count'); if (oc) oc.textContent = s.players.length;   // contador del lobby
+  const pc = D('players-count'); if (pc) pc.textContent = s.players.length;  // contador en partida
   const me = s.players.find(p => p.id === selfId);
   if (me) {
     selfHealth = me.health; selfMaxHealth = me.maxHealth;
@@ -153,6 +153,7 @@ socket.on('hit', (d) => {
 });
 socket.on('healed', () => { sfx.playLocal('heal', 0.7); healFlash(); showToast('+60 vida'); });
 socket.on('announce', (d) => { showToast(d.text); sfx.playLocal('multi', 0.45); });
+socket.on('notify', (d) => { showNotify(d.text); sfx.playLocal(d.kind === 'join' ? 'pickup' : 'ui', 0.5); });
 socket.on('boost', (d) => { boostUntil = performance.now() + d.ms; sfx.playLocal('power', 0.8); showToast('⚡ DAÑO x2'); });
 socket.on('pongcheck', (t) => { pingMs = Math.round(performance.now() - t); });
 setInterval(() => { if (joined) socket.emit('pingcheck', performance.now()); }, 2000);
@@ -1530,6 +1531,17 @@ function showToast(msg) {
   if (!el) return;
   el.textContent = msg;
   el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
+}
+// Banner de avisos (jugador entró/salió) — independiente de los toasts del juego
+let notifyTimer = null;
+function showNotify(msg) {
+  const el = D('notify');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
+  clearTimeout(notifyTimer);
+  notifyTimer = setTimeout(() => el.classList.add('hidden'), 3500);
 }
 let dmgTimer = null;
 function flashDamage() {

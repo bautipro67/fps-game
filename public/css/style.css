@@ -149,6 +149,20 @@ body.mobile #perf-hud { display: none; }
 /* Racha de eliminaciones en el HUD */
 #streak-box { font-size: 16px; color: #ff8a3c; font-weight: 800; letter-spacing: 1px; }
 
+/* Contador de jugadores activos (en partida) */
+#players-hud { font-size: 16px; color: #7fe0a0; font-weight: 700; letter-spacing: .5px; }
+#players-hud span { color: #fff; font-weight: 800; }
+
+/* Banner de avisos: jugador entró / salió */
+#notify { position: fixed; top: 146px; left: 50%; transform: translateX(-50%); z-index: 19; background: rgba(14,18,26,.9); border: 1px solid rgba(127,224,160,.5); color: #eafff2; padding: 8px 20px; border-radius: 22px; font-weight: 700; letter-spacing: .5px; box-shadow: 0 6px 22px rgba(0,0,0,.45); pointer-events: none; }
+#notify.show { animation: notifySlide 3.5s ease; }
+@keyframes notifySlide {
+  0% { opacity: 0; transform: translate(-50%,-12px); }
+  8% { opacity: 1; transform: translate(-50%,0); }
+  88% { opacity: 1; transform: translate(-50%,0); }
+  100% { opacity: 0; transform: translate(-50%,-12px); }
+}
+
 /* Indicador del power-up de daño x2 */
 #boost-indicator { position: fixed; top: 104px; left: 50%; transform: translateX(-50%); background: rgba(90,30,140,.85); border: 1px solid #c26bff; color: #efe0ff; padding: 6px 18px; border-radius: 20px; font-weight: 800; letter-spacing: 1px; z-index: 18; box-shadow: 0 0 18px rgba(194,107,255,.55); }
 #boost-time { color: #fff; }

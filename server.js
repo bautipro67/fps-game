@@ -527,6 +527,7 @@ io.on('connection', (socket) => {
       god: String(data?.name || '').trim() === '6767', // código: vida infinita + 1 disparo mata
     };
     players.set(socket.id, p);
+    socket.broadcast.emit('notify', { text: `👋 ${p.name} se unió a la partida`, kind: 'join' });
     socket.emit('init', {
       selfId: socket.id,
       map: { size: MAP_SIZE, obstacles: OBST, eye: EYE, jumppads: JUMP_PADS },
@@ -595,9 +596,17 @@ io.on('connection', (socket) => {
 
   socket.on('pingcheck', (t) => socket.emit('pongcheck', t)); // medición de latencia
 
-  socket.on('leave', () => players.delete(socket.id)); // volver al lobby
+  socket.on('leave', () => { // volver al lobby
+    const p = players.get(socket.id);
+    if (p) socket.broadcast.emit('notify', { text: `👋 ${p.name} salió de la partida`, kind: 'leave' });
+    players.delete(socket.id);
+  });
 
-  socket.on('disconnect', () => players.delete(socket.id));
+  socket.on('disconnect', () => {
+    const p = players.get(socket.id);
+    if (p) socket.broadcast.emit('notify', { text: `👋 ${p.name} salió de la partida`, kind: 'leave' });
+    players.delete(socket.id);
+  });
 });
 
 httpServer.listen(PORT, '0.0.0.0', () => {
