@@ -75,11 +75,16 @@ const _mv = new THREE.Vector3();
 const effectLights = [];
 let lightIdx = 0;
 let jumpPads = [], dust = null, powerMesh = null;
+let worldGroup = null, builtTheme = null;              // para reconstruir el mundo al cambiar de mapa
 const padRings = [];                                   // anillos ascendentes de los jump pads
-const AMMO_CRATES = [{ x: 27, z: 27 }, { x: -27, z: -27 }]; // cajas de munición
+let AMMO_CRATES = [{ x: 27, z: 27 }, { x: -27, z: -27 }]; // cajas de munición (las define el mapa)
 const ammoCrateMeshes = [];
 let ammoCd = 0;
 let boostUntil = 0;                                    // mi power-up de daño x2
+let myTeam = null;                                     // 'A' | 'B' | null (FFA)
+const TEAM_COLOR = { A: 0x3b82f6, B: 0xe0483b };       // azul / rojo
+const ALLY = 0x39d98a, ENEMY = 0xff5a5a;               // verde aliado / rojo enemigo
+let chosenMode = 'ffa', currentMode = 'ffa', modePicked = false; // selección de modo en el lobby
 const shotPings = [];                                  // destellos de disparos en el minimapa
 let enemyAcc = 0;                                      // detección de enemigo bajo la mira
 
@@ -99,10 +104,12 @@ if (isMobile) document.body.classList.add('mobile');
 socket.on('init', (data) => {
   selfId = data.selfId;
   weapons = data.weapons;
+  if (data.mode) currentMode = data.mode;
   EYE = data.map.eye;
   local.x = data.spawn.x; local.z = data.spawn.z; local.feetY = 0;
   setWeapon(data.weapon, true);
-  if (!worldBuilt) { initThree(); buildWorld(data.map); worldBuilt = true; }
+  if (!worldBuilt) { initThree(); buildWorld(data.map); worldBuilt = true; builtTheme = data.map.theme; }
+  else if (data.map.theme !== builtTheme) { buildWorld(data.map); builtTheme = data.map.theme; } // cambió el mapa
   joined = true;
   D('menu').classList.add('hidden');
   D('crosshair').classList.remove('hidden');
@@ -116,6 +123,10 @@ socket.on('state', (s) => {
   latest = s;
   const oc = D('online-count'); if (oc) oc.textContent = s.players.length;   // contador del lobby
   const pc = D('players-count'); if (pc) pc.textContent = s.players.length;  // contador en partida
+  const meSt = s.players.find(p => p.id === selfId);
+  myTeam = meSt ? meSt.team : null;
+  updateTeamHud(s);                                                          // marcador por equipos
+  if (!joined && !modePicked && s.mode) setMode(s.mode);                     // en el lobby, refleja el modo activo
   const me = s.players.find(p => p.id === selfId);
   if (me) {
     selfHealth = me.health; selfMaxHealth = me.maxHealth;
@@ -157,6 +168,12 @@ socket.on('healed', () => { sfx.playLocal('heal', 0.7); healFlash(); showToast('
 socket.on('announce', (d) => { showToast(d.text); sfx.playLocal('multi', 0.45); });
 socket.on('notify', (d) => { showNotify(d.text); sfx.playLocal(d.kind === 'join' ? 'pickup' : 'ui', 0.5); });
 socket.on('boost', (d) => { boostUntil = performance.now() + d.ms; sfx.playLocal('power', 0.8); showToast('⚡ DAÑO x2'); });
+socket.on('counts', (c) => {  // contadores de jugadores por modo (lobby)
+  const a = D('count-ffa'), b = D('count-teams'), tot = D('online-count');
+  if (a) a.textContent = c.ffa;
+  if (b) b.textContent = c.teams;
+  if (tot) tot.textContent = c.ffa + c.teams;
+});
 socket.on('pongcheck', (t) => { pingMs = Math.round(performance.now() - t); });
 setInterval(() => { if (joined) socket.emit('pingcheck', performance.now()); }, 2000);
 socket.on('damaged', (d) => { flashDamage(); sfx.playLocal('damaged', 0.8); showDamageDir(d && d.from); });
@@ -169,7 +186,7 @@ socket.on('tracer', (t) => {
   if (shotPings.length > 24) shotPings.shift();
 });
 socket.on('killfeed', (k) => addKillFeed(k));
-socket.on('gameover', (d) => { if (joined) showGameOver(d.ranking); });
+socket.on('gameover', (d) => { if (joined) showGameOver(d.ranking, d.mode, d.teamScore); });
 socket.on('matchstart', () => { D('gameover-screen').classList.add('hidden'); });
 
 // Enviar nuestra posición ~20 veces por segundo
@@ -306,7 +323,7 @@ function addBox(x, y, z, w, h, d, mat) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
   m.position.set(x, y, z);
   m.castShadow = true; m.receiveShadow = true;
-  scene.add(m);
+  worldGroup.add(m);
   worldColliders.push(m); // para los impactos de bala
   return m;
 }
@@ -316,123 +333,114 @@ function addEdges(mesh, color) {
   mesh.add(line);
 }
 
+function disposeGroup(grp) {
+  grp.traverse((o) => {
+    if (o.geometry) o.geometry.dispose();
+    if (o.material) { Array.isArray(o.material) ? o.material.forEach(m => m.dispose()) : o.material.dispose(); }
+  });
+}
 function buildWorld(map) {
   const size = map.size, half = size / 2;
   obstacles = map.obstacles;
+  const theme = map.theme || 'arena';
+  const accent = theme === 'frente' ? 0xff7a3c : 0x33d6ff;  // color neón por mapa
+  const accent2 = theme === 'frente' ? 0xffb37a : 0x6fe6ff;
+  const floorCol = theme === 'frente' ? 0x4a3a30 : 0x394452;
+
+  // ---- limpiar el mundo anterior (cambio de mapa) ----
+  if (worldGroup) { scene.remove(worldGroup); disposeGroup(worldGroup); }
+  worldGroup = new THREE.Group(); scene.add(worldGroup);
+  worldColliders.length = 0; spinners.length = 0; padRings.length = 0; ammoCrateMeshes.length = 0;
+  for (const [, m] of pickupMeshes) scene.remove(m); pickupMeshes.clear();
+  for (const [, m] of medkitMeshes) scene.remove(m); medkitMeshes.clear();
+  for (const [, m] of dropMeshes) scene.remove(m); dropMeshes.clear();
+  powerMesh = null; dust = null;
+  AMMO_CRATES = map.ammocrates || AMMO_CRATES;
+  const add = (o) => worldGroup.add(o);
 
   // ---- suelo texturizado ----
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(size, size),
-    new THREE.MeshStandardMaterial({ map: makeFloorTexture(), roughness: .95 })
-  );
-  floor.rotation.x = -Math.PI / 2;
-  floor.receiveShadow = true;
-  scene.add(floor);
-  worldColliders.push(floor);
+  const floorMat = new THREE.MeshStandardMaterial({ map: makeFloorTexture(), roughness: .95 });
+  floorMat.color.setHex(floorCol);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(size, size), floorMat);
+  floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; add(floor); worldColliders.push(floor);
 
-  // ---- horizonte de edificios lejanos (fusionado en 1 sola malla = 1 draw call) ----
+  // ---- horizonte de edificios lejanos (fusionado en 1 sola malla) ----
   const cityGeos = [];
   for (let i = 0; i < 70; i++) {
     const ang = (i / 70) * Math.PI * 2 + Math.random() * 0.06;
-    const rad = half + 22 + Math.random() * 70;
-    const bh = 12 + Math.random() * 52;
-    const bw = 6 + Math.random() * 12;
+    const rad = half + 22 + Math.random() * 70, bh = 12 + Math.random() * 52, bw = 6 + Math.random() * 12;
     const geo = new THREE.BoxGeometry(bw, bh, bw);
     geo.translate(Math.cos(ang) * rad, bh / 2, Math.sin(ang) * rad);
     cityGeos.push(geo);
   }
-  const city = new THREE.Mesh(mergeGeometries(cityGeos),
-    new THREE.MeshStandardMaterial({ color: 0x2c3543, roughness: 1, emissive: 0x141d2a, emissiveIntensity: .35 }));
-  scene.add(city);
+  add(new THREE.Mesh(mergeGeometries(cityGeos),
+    new THREE.MeshStandardMaterial({ color: 0x2c3543, roughness: 1, emissive: 0x141d2a, emissiveIntensity: .35 })));
 
-  // ---- aro central decorativo ----
+  // ---- aro central + emblema flotante ----
   const ring = new THREE.Mesh(new THREE.RingGeometry(7.6, 8.4, 56),
     new THREE.MeshBasicMaterial({ color: 0xf8c537, transparent: true, opacity: .45 }));
-  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.03; scene.add(ring);
-
-  // ---- emblema central flotante (orientación + adorno) ----
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.03; add(ring);
   const halo = new THREE.Mesh(new THREE.TorusGeometry(2.4, 0.18, 10, 36),
     new THREE.MeshStandardMaterial({ color: 0xf8c537, emissive: 0xf8c537, emissiveIntensity: 1.2 }));
-  halo.rotation.x = Math.PI / 2; halo.position.set(0, 9, 0); scene.add(halo); spinners.push(halo);
+  halo.rotation.x = Math.PI / 2; halo.position.set(0, 9, 0); add(halo); spinners.push(halo);
   const haloCore = new THREE.Mesh(new THREE.IcosahedronGeometry(0.95, 0),
-    new THREE.MeshStandardMaterial({ color: 0x33d6ff, emissive: 0x33d6ff, emissiveIntensity: 1.0 }));
-  haloCore.position.set(0, 9, 0); scene.add(haloCore); spinners.push(haloCore);
+    new THREE.MeshStandardMaterial({ color: accent, emissive: accent, emissiveIntensity: 1.0 }));
+  haloCore.position.set(0, 9, 0); add(haloCore); spinners.push(haloCore);
 
   // ---- plataformas de salto ----
   jumpPads = map.jumppads || [];
   for (const pad of jumpPads) {
     const disc = new THREE.Mesh(new THREE.CircleGeometry(1.4, 28),
-      new THREE.MeshStandardMaterial({ color: 0x0e2a3a, emissive: 0x33d6ff, emissiveIntensity: .7 }));
-    disc.rotation.x = -Math.PI / 2; disc.position.set(pad.x, 0.05, pad.z); scene.add(disc);
-    const pring = new THREE.Mesh(new THREE.TorusGeometry(1.4, 0.09, 8, 28),
-      new THREE.MeshBasicMaterial({ color: 0x6fe6ff }));
-    pring.rotation.x = Math.PI / 2; pring.position.set(pad.x, 0.12, pad.z); scene.add(pring);
+      new THREE.MeshStandardMaterial({ color: 0x0e2a3a, emissive: accent, emissiveIntensity: .7 }));
+    disc.rotation.x = -Math.PI / 2; disc.position.set(pad.x, 0.05, pad.z); add(disc);
+    const pring = new THREE.Mesh(new THREE.TorusGeometry(1.4, 0.09, 8, 28), new THREE.MeshBasicMaterial({ color: accent2 }));
+    pring.rotation.x = Math.PI / 2; pring.position.set(pad.x, 0.12, pad.z); add(pring);
     const beam = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.15, 5, 18, 1, true),
-      new THREE.MeshBasicMaterial({ color: 0x33d6ff, transparent: true, opacity: 0.07, side: THREE.DoubleSide, depthWrite: false }));
-    beam.position.set(pad.x, 2.5, pad.z); scene.add(beam);
+      new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.07, side: THREE.DoubleSide, depthWrite: false }));
+    beam.position.set(pad.x, 2.5, pad.z); add(beam);
     const rise = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.05, 8, 24),
-      new THREE.MeshBasicMaterial({ color: 0x6fe6ff, transparent: true, opacity: 0.5 }));
-    rise.rotation.x = Math.PI / 2; rise.position.set(pad.x, 0.2, pad.z);
-    scene.add(rise); padRings.push(rise);
+      new THREE.MeshBasicMaterial({ color: accent2, transparent: true, opacity: 0.5 }));
+    rise.rotation.x = Math.PI / 2; rise.position.set(pad.x, 0.2, pad.z); add(rise); padRings.push(rise);
   }
 
-  // ---- power-up de daño x2 (en lo alto de la torre central) ----
+  // ---- power-up de daño x2 ----
   powerMesh = new THREE.Group();
-  const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.55, 0),
-    new THREE.MeshStandardMaterial({ color: 0xc26bff, emissive: 0xb14cff, emissiveIntensity: 1.3 }));
-  powerMesh.add(orb);
+  powerMesh.add(new THREE.Mesh(new THREE.OctahedronGeometry(0.55, 0),
+    new THREE.MeshStandardMaterial({ color: 0xc26bff, emissive: 0xb14cff, emissiveIntensity: 1.3 })));
   const pbeam = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 26, 16, 1, true),
     new THREE.MeshBasicMaterial({ color: 0xc26bff, transparent: true, opacity: 0.10, side: THREE.DoubleSide, depthWrite: false }));
   pbeam.position.y = 10; powerMesh.add(pbeam);
-  powerMesh.position.set(0, 7.0, 0);
-  scene.add(powerMesh);
+  powerMesh.position.set(0, 7.0, 0); add(powerMesh);
 
-  // ---- marcas de color en el suelo de cada cuadrante (orientación) ----
-  for (const [cx2, cz2, cc] of [[35, 35, 0xff5a5a], [35, -35, 0xffe14d], [-35, 35, 0x33d6ff], [-35, -35, 0x7cfc66]]) {
-    const qd = new THREE.Mesh(new THREE.CircleGeometry(6, 26),
-      new THREE.MeshBasicMaterial({ color: cc, transparent: true, opacity: 0.07, depthWrite: false }));
-    qd.rotation.x = -Math.PI / 2; qd.position.set(cx2, 0.04, cz2);
-    scene.add(qd);
-  }
-
-  // ---- cajas de munición (recargan tu reserva al pasar) ----
+  // ---- cajas de munición ----
   for (const a of AMMO_CRATES) {
     const g = new THREE.Group();
     const box = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.55, 0.65),
       new THREE.MeshStandardMaterial({ color: 0x3a4252, metalness: .4, roughness: .5 }));
     box.castShadow = true; g.add(box);
-    const band = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.16, 0.7),
-      new THREE.MeshStandardMaterial({ color: 0xf8c537, emissive: 0xf8c537, emissiveIntensity: .6 }));
-    g.add(band);
-    const aring = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.045, 8, 24),
-      new THREE.MeshBasicMaterial({ color: 0xf8c537 }));
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.16, 0.7),
+      new THREE.MeshStandardMaterial({ color: 0xf8c537, emissive: 0xf8c537, emissiveIntensity: .6 })));
+    const aring = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.045, 8, 24), new THREE.MeshBasicMaterial({ color: 0xf8c537 }));
     aring.rotation.x = Math.PI / 2; aring.position.y = -0.35; g.add(aring);
-    g.position.set(a.x, 0.75, a.z);
-    scene.add(g);
-    ammoCrateMeshes.push(g);
+    g.position.set(a.x, 0.75, a.z); add(g); ammoCrateMeshes.push(g);
   }
 
-  // ---- partículas de polvo en suspensión (atmósfera) ----
+  // ---- polvo en suspensión ----
   const dustN = 220, dustPos = new Float32Array(dustN * 3);
-  for (let i = 0; i < dustN; i++) {
-    dustPos[i * 3] = Math.random() * 100 - 50;
-    dustPos[i * 3 + 1] = Math.random() * 22;
-    dustPos[i * 3 + 2] = Math.random() * 100 - 50;
-  }
+  for (let i = 0; i < dustN; i++) { dustPos[i * 3] = Math.random() * 100 - 50; dustPos[i * 3 + 1] = Math.random() * 22; dustPos[i * 3 + 2] = Math.random() * 100 - 50; }
   const dustGeo = new THREE.BufferGeometry();
   dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
   dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ color: 0xbcd6ee, size: 0.08, transparent: true, opacity: 0.35, depthWrite: false }));
-  scene.add(dust);
+  add(dust);
 
   // ---- muros perimetrales con franja luminosa ----
-  const wallMat = new THREE.MeshStandardMaterial({ color: 0x38424f, roughness: .85 });
+  const wallMat = new THREE.MeshStandardMaterial({ color: theme === 'frente' ? 0x4a4038 : 0x38424f, roughness: .85 });
   const h = 8, t = 2;
-  const walls = [[0, half, size, t], [0, -half, size, t], [half, 0, t, size], [-half, 0, t, size]];
-  for (const [wx, wz, ww, wd] of walls) {
+  for (const [wx, wz, ww, wd] of [[0, half, size, t], [0, -half, size, t], [half, 0, t, size], [-half, 0, t, size]]) {
     addBox(wx, h / 2, wz, ww, h, wd, wallMat);
     const trim = new THREE.Mesh(new THREE.BoxGeometry(ww + 0.05, 0.28, wd + 0.05),
-      new THREE.MeshStandardMaterial({ color: 0x33d6ff, emissive: 0x33d6ff, emissiveIntensity: .85 }));
-    trim.position.set(wx, h - 0.7, wz); scene.add(trim);
+      new THREE.MeshStandardMaterial({ color: accent, emissive: accent, emissiveIntensity: .85 }));
+    trim.position.set(wx, h - 0.7, wz); add(trim);
   }
 
   // ---- obstáculos diferenciados ----
@@ -441,37 +449,23 @@ function buildWorld(map) {
     const isCover = o.h <= 3;
     const isBarrier = (o.w === 2 || o.d === 2) && Math.max(o.w, o.d) > 10;
     if (isCover) {
-      // cajas de cobertura tipo crate
-      const m = addBox(o.x, o.h / 2, o.z, o.w, o.h, o.d,
-        new THREE.MeshStandardMaterial({ map: crateTex, roughness: .9 }));
-      addEdges(m, 0x2e2618);
+      addEdges(addBox(o.x, o.h / 2, o.z, o.w, o.h, o.d, new THREE.MeshStandardMaterial({ map: crateTex, roughness: .9 })), 0x2e2618);
     } else if (isBarrier) {
-      // barreras con franja amarilla
-      const m = addBox(o.x, o.h / 2, o.z, o.w, o.h, o.d,
-        new THREE.MeshStandardMaterial({ color: 0x47505e, roughness: .8 }));
-      addEdges(m, 0x222831);
+      addEdges(addBox(o.x, o.h / 2, o.z, o.w, o.h, o.d, new THREE.MeshStandardMaterial({ color: 0x47505e, roughness: .8 })), 0x222831);
       const tr = new THREE.Mesh(new THREE.BoxGeometry(o.w + 0.06, 0.22, o.d + 0.06),
         new THREE.MeshStandardMaterial({ color: 0xf8c537, emissive: 0xf8c537, emissiveIntensity: .5 }));
-      tr.position.set(o.x, o.h - 0.4, o.z); scene.add(tr);
+      tr.position.set(o.x, o.h - 0.4, o.z); add(tr);
     } else {
-      // pilares tecnológicos con tiras neón y núcleo brillante
-      const m = addBox(o.x, o.h / 2, o.z, o.w, o.h, o.d,
-        new THREE.MeshStandardMaterial({ color: 0x515b6c, metalness: .35, roughness: .55 }));
+      const m = addBox(o.x, o.h / 2, o.z, o.w, o.h, o.d, new THREE.MeshStandardMaterial({ color: 0x515b6c, metalness: .35, roughness: .55 }));
       addEdges(m, 0x20262f);
-      const stripMat = new THREE.MeshStandardMaterial({ color: 0x33d6ff, emissive: 0x33d6ff, emissiveIntensity: .7 });
+      const stripMat = new THREE.MeshStandardMaterial({ color: accent, emissive: accent, emissiveIntensity: .7 });
       for (const sx of [-1, 1]) {
         const s = new THREE.Mesh(new THREE.BoxGeometry(0.14, o.h * 0.7, 0.14), stripMat);
-        s.position.set(o.x + sx * (o.w / 2 + 0.02), o.h * 0.45, o.z); scene.add(s);
+        s.position.set(o.x + sx * (o.w / 2 + 0.02), o.h * 0.45, o.z); add(s);
       }
-      // balizas de orientación: las torres de las esquinas tienen un color por cuadrante
-      const isCorner = Math.abs(o.x) === 35 && Math.abs(o.z) === 35;
-      const coreCol = isCorner
-        ? (o.x > 0 ? (o.z > 0 ? 0xff5a5a : 0xffe14d) : (o.z > 0 ? 0x33d6ff : 0x7cfc66))
-        : 0xffb03a;
-      const core = new THREE.Mesh(new THREE.IcosahedronGeometry(isCorner ? 0.65 : 0.45, 0),
-        new THREE.MeshStandardMaterial({ color: coreCol, emissive: coreCol, emissiveIntensity: 1.4 }));
-      core.position.set(o.x, o.h + 0.6, o.z); core.userData.spin = true; scene.add(core);
-      spinners.push(core);
+      const core = new THREE.Mesh(new THREE.IcosahedronGeometry(0.45, 0),
+        new THREE.MeshStandardMaterial({ color: 0xffb03a, emissive: 0xffb03a, emissiveIntensity: 1.4 }));
+      core.position.set(o.x, o.h + 0.6, o.z); add(core); spinners.push(core);
     }
   }
 }
@@ -798,7 +792,11 @@ function syncEntities() {
       const aura = new THREE.Mesh(new THREE.SphereGeometry(1.2, 16, 12),
         new THREE.MeshBasicMaterial({ color: 0xc26bff, transparent: true, opacity: 0.15, depthWrite: false }));
       aura.position.y = 1.05; aura.visible = false; group.add(aura);
-      e = { id, group, avatar, label, labelG: label.group, shield, crown, aura, rot: st.ry + Math.PI, prevAlive: st.alive, target: { x: st.x, y: st.y, z: st.z, ry: st.ry } };
+      // anillo de equipo a los pies (verde aliado / rojo enemigo) — solo en modo equipos
+      const teamRing = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.07, 8, 24),
+        new THREE.MeshBasicMaterial({ color: ALLY }));
+      teamRing.rotation.x = Math.PI / 2; teamRing.position.y = 0.06; teamRing.visible = false; group.add(teamRing);
+      e = { id, group, avatar, label, labelG: label.group, shield, crown, aura, teamRing, rot: st.ry + Math.PI, prevAlive: st.alive, target: { x: st.x, y: st.y, z: st.z, ry: st.ry } };
       entities.set(id, e);
     }
     // sonidos posicionales: muerte (de todos) y aparición (de jugadores)
@@ -813,6 +811,13 @@ function syncEntities() {
     e.label.setHealth(st.health / st.maxHealth);
     e.shield.visible = !!st.protected;
     e.aura.visible = !!st.boosted; // aura violeta: lleva daño x2
+    // equipos: anillo aliado/enemigo a los pies
+    if (latest.mode === 'teams' && st.team) {
+      e.teamRing.visible = true;
+      e.teamRing.material.color.setHex(st.team === myTeam ? ALLY : ENEMY);
+    } else e.teamRing.visible = false;
+    e.team = st.team;
+    e.avatar.userData.team = st.team;
     if (e.weapon !== st.weapon) setHeldWeapon(e, st.weapon); // arma visible en la mano
   };
 
@@ -1224,11 +1229,15 @@ function drawMinimap() {
   for (const [bx2, bz2, bc] of [[35, 35, '#ff5a5a'], [35, -35, '#ffe14d'], [-35, 35, '#33d6ff'], [-35, -35, '#7cfc66']]) {
     c.fillStyle = bc; c.beginPath(); c.arc(X(bx2), Z(bz2), 2.6, 0, 7); c.fill();
   }
-  c.fillStyle = '#e0483b';
-  for (const b of latest.bots) if (b.alive) { c.beginPath(); c.arc(X(b.x), Z(b.z), 2.2, 0, 7); c.fill(); }
+  const teams = latest.mode === 'teams';
+  for (const b of latest.bots) {
+    if (!b.alive) continue;
+    c.fillStyle = teams ? (b.team === myTeam ? '#39d98a' : '#ff5a5a') : '#e0483b';
+    c.beginPath(); c.arc(X(b.x), Z(b.z), 2.2, 0, 7); c.fill();
+  }
   for (const p of latest.players) {
     if (p.id === selfId || !p.alive) continue;
-    c.fillStyle = '#' + colorForId(p.id).toString(16).padStart(6, '0');
+    c.fillStyle = teams ? (p.team === myTeam ? '#39d98a' : '#ff5a5a') : '#' + colorForId(p.id).toString(16).padStart(6, '0');
     c.beginPath(); c.arc(X(p.x), Z(p.z), 2.8, 0, 7); c.fill();
   }
   // destellos de disparos recientes (de dónde vienen los tiros)
@@ -1553,6 +1562,29 @@ function multiKill(text) {
   el.textContent = text;
   el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
 }
+// Selección de modo en el lobby (resalta el botón elegido)
+function setMode(m, byUser) {
+  chosenMode = m;
+  currentMode = m;
+  if (byUser) modePicked = true;
+  const ffa = D('mode-ffa'), team = D('mode-teams');
+  if (ffa) ffa.classList.toggle('selected', m === 'ffa');
+  if (team) team.classList.toggle('selected', m === 'teams');
+}
+
+// Marcador por equipos (arriba) — solo visible en modo equipos
+function updateTeamHud(s) {
+  const box = D('team-scores');
+  if (!box) return;
+  if (s.mode !== 'teams') { box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  const ts = s.teamScore || { A: 0, B: 0 };
+  D('ts-a').textContent = ts.A;
+  D('ts-b').textContent = ts.B;
+  D('team-a').classList.toggle('mine', myTeam === 'A');
+  D('team-b').classList.toggle('mine', myTeam === 'B');
+}
+
 function showToast(msg) {
   const el = D('toast');
   if (!el) return;
@@ -1742,15 +1774,22 @@ function hideDeath() {
   D('death-screen').classList.add('hidden');
   clearInterval(deathTimer);
 }
-function showGameOver(ranking) {
+function showGameOver(ranking, mode, teamScore) {
   const body = D('final-body');
   body.innerHTML = ranking.map((p, i) =>
     `<tr class="${p.name === myName() ? 'me' : ''}"><td>${i + 1}</td><td>${esc(p.name)}</td><td>${p.score}</td><td>${p.kills ?? 0}</td><td>${p.deaths}</td></tr>`
   ).join('');
-  const winner = ranking[0];
-  D('winner').innerHTML = winner
-    ? `🏆 Ganador: <b>${esc(winner.name)}</b> con ${winner.score} puntos`
-    : 'Sin jugadores';
+  if (mode === 'teams' && teamScore) {
+    const a = teamScore.A, b = teamScore.B;
+    const res = a === b ? '🤝 ¡Empate!'
+      : (a > b ? '🔵 ¡Gana el Equipo Azul!' : '🔴 ¡Gana el Equipo Rojo!');
+    D('winner').innerHTML = `${res}<br><span style="font-size:18px;opacity:.85">🔵 ${a} &nbsp;–&nbsp; ${b} 🔴</span>`;
+  } else {
+    const winner = ranking[0];
+    D('winner').innerHTML = winner
+      ? `🏆 Ganador: <b>${esc(winner.name)}</b> con ${winner.score} puntos`
+      : 'Sin jugadores';
+  }
   D('gameover-screen').classList.remove('hidden');
   if (controls) controls.unlock();
 }
@@ -1884,7 +1923,11 @@ function animate() {
       if (hits.length) {
         let o = hits[0].object;
         while (o && o !== scene) {
-          if (o.userData && o.userData.isAvatar) { onEnemy = true; break; }
+          if (o.userData && o.userData.isAvatar) {
+            const isAlly = latest.mode === 'teams' && o.userData.team && o.userData.team === myTeam;
+            onEnemy = !isAlly; // no marcar rojo sobre compañeros
+            break;
+          }
           o = o.parent;
         }
       }
@@ -1948,10 +1991,16 @@ function animate() {
     wrap.appendChild(el);
   });
 
+  // selector de modo de juego
+  const mffa = D('mode-ffa'), mteam = D('mode-teams');
+  if (mffa) mffa.onclick = () => { sfx.init(); sfx.playLocal('ui', 0.4); setMode('ffa', true); };
+  if (mteam) mteam.onclick = () => { sfx.init(); sfx.playLocal('ui', 0.4); setMode('teams', true); };
+  setMode('ffa'); // por defecto
+
   D('play-btn').onclick = () => {
     if (!chosen) return;
     sfx.init(); sfx.playLocal('ui', 0.5);
     const name = D('name-input').value.trim() || 'Jugador';
-    socket.emit('join', { name, weapon: chosen });
+    socket.emit('join', { name, weapon: chosen, mode: chosenMode });
   };
 })();
