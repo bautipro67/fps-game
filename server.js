@@ -93,19 +93,17 @@ const SPAWNS_FFA = [
 // --- Mapa 2: FRENTE (Batalla en equipos) — simétrico, dos bases en ±Z ---
 const OBST_TEAMS = [
   { x: 0, z: 0, w: 8, d: 8, h: 6 },                 // torre central (power-up)
-  { x: 0, z: 40, w: 22, d: 2, h: 4 },               // base A (z+)
-  { x: -11, z: 35, w: 2, d: 12, h: 4 }, { x: 11, z: 35, w: 2, d: 12, h: 4 },
-  { x: 0, z: -40, w: 22, d: 2, h: 4 },              // base B (z-)
-  { x: -11, z: -35, w: 2, d: 12, h: 4 }, { x: 11, z: -35, w: 2, d: 12, h: 4 },
-  { x: 18, z: 14, w: 5, d: 5, h: 4 }, { x: -18, z: 14, w: 5, d: 5, h: 4 }, // cobertura media
-  { x: 18, z: -14, w: 5, d: 5, h: 4 }, { x: -18, z: -14, w: 5, d: 5, h: 4 },
-  { x: 0, z: 19, w: 6, d: 2, h: 3 }, { x: 0, z: -19, w: 6, d: 2, h: 3 },
-  { x: 34, z: 0, w: 2, d: 34, h: 5 }, { x: -34, z: 0, w: 2, d: 34, h: 5 }, // muros laterales
+  { x: 0, z: 30, w: 16, d: 2, h: 4 },               // cobertura frontal base A (abierta, no encierra)
+  { x: 0, z: -30, w: 16, d: 2, h: 4 },              // cobertura frontal base B
+  { x: 18, z: 12, w: 5, d: 5, h: 4 }, { x: -18, z: 12, w: 5, d: 5, h: 4 }, // cobertura media
+  { x: 18, z: -12, w: 5, d: 5, h: 4 }, { x: -18, z: -12, w: 5, d: 5, h: 4 },
+  { x: 0, z: 16, w: 6, d: 2, h: 3 }, { x: 0, z: -16, w: 6, d: 2, h: 3 },
+  { x: 30, z: 0, w: 2, d: 18, h: 5 }, { x: -30, z: 0, w: 2, d: 18, h: 5 }, // muros laterales cortos
   { x: 12, z: 0, w: 3, d: 3, h: 2.5 }, { x: -12, z: 0, w: 3, d: 3, h: 2.5 },
-  { x: 25, z: 26, w: 4, d: 4, h: 3.5 }, { x: -25, z: 26, w: 4, d: 4, h: 3.5 },
-  { x: 25, z: -26, w: 4, d: 4, h: 3.5 }, { x: -25, z: -26, w: 4, d: 4, h: 3.5 },
-  { x: 8, z: 28, w: 3, d: 3, h: 2.5 }, { x: -8, z: 28, w: 3, d: 3, h: 2.5 },
-  { x: 8, z: -28, w: 3, d: 3, h: 2.5 }, { x: -8, z: -28, w: 3, d: 3, h: 2.5 },
+  { x: 22, z: 24, w: 4, d: 4, h: 3.5 }, { x: -22, z: 24, w: 4, d: 4, h: 3.5 },
+  { x: 22, z: -24, w: 4, d: 4, h: 3.5 }, { x: -22, z: -24, w: 4, d: 4, h: 3.5 },
+  { x: 10, z: 36, w: 3, d: 3, h: 2.5 }, { x: -10, z: 36, w: 3, d: 3, h: 2.5 }, // cajas sueltas (cobertura sin encerrar)
+  { x: 10, z: -36, w: 3, d: 3, h: 2.5 }, { x: -10, z: -36, w: 3, d: 3, h: 2.5 },
 ];
 const SPAWNS_TEAMS_A = [{ x: 0, z: 45 }, { x: -8, z: 43 }, { x: 8, z: 43 }, { x: -16, z: 41 }, { x: 16, z: 41 }, { x: 0, z: 38 }];
 const SPAWNS_TEAMS_B = [{ x: 0, z: -45 }, { x: -8, z: -43 }, { x: 8, z: -43 }, { x: -16, z: -41 }, { x: 16, z: -41 }, { x: 0, z: -38 }];
@@ -154,7 +152,7 @@ const MAPS = {
       { id: 'p4', x: 28, z: 22, weapon: 'smg' }, { id: 'p5', x: -28, z: -22, weapon: 'smg' },
       { id: 'p6', x: 28, z: -22, weapon: 'rifle' }, { id: 'p7', x: -28, z: 22, weapon: 'rifle' },
     ],
-    medkitSpawns: [{ id: 'm0', x: 0, z: 30 }, { id: 'm1', x: 0, z: -30 }, { id: 'm2', x: 26, z: 0 }, { id: 'm3', x: -26, z: 0 }],
+    medkitSpawns: [{ id: 'm0', x: 0, z: 20 }, { id: 'm1', x: 0, z: -20 }, { id: 'm2', x: 26, z: 0 }, { id: 'm3', x: -26, z: 0 }],
     ammocrates: [{ x: 26, z: 8 }, { x: -26, z: -8 }],
   },
   duel: {
