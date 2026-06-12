@@ -126,6 +126,7 @@ socket.on('state', (s) => {
   const meSt = s.players.find(p => p.id === selfId);
   myTeam = meSt ? meSt.team : null;
   updateTeamHud(s);                                                          // marcador por equipos
+  updateDuelUI(s);                                                           // interfaz del duelo 1v1
   if (!joined && !modePicked && s.mode) setMode(s.mode);                     // en el lobby, refleja el modo activo
   const me = s.players.find(p => p.id === selfId);
   if (me) {
@@ -169,11 +170,18 @@ socket.on('announce', (d) => { showToast(d.text); sfx.playLocal('multi', 0.45); 
 socket.on('notify', (d) => { showNotify(d.text); sfx.playLocal(d.kind === 'join' ? 'pickup' : 'ui', 0.5); });
 socket.on('boost', (d) => { boostUntil = performance.now() + d.ms; sfx.playLocal('power', 0.8); showToast('⚡ DAÑO x2'); });
 socket.on('counts', (c) => {  // contadores de jugadores por modo (lobby)
-  const a = D('count-ffa'), b = D('count-teams'), tot = D('online-count');
+  const a = D('count-ffa'), b = D('count-teams'), du = D('count-duel'), tot = D('online-count');
   if (a) a.textContent = c.ffa;
   if (b) b.textContent = c.teams;
-  if (tot) tot.textContent = c.ffa + c.teams;
+  if (du) du.textContent = (c.duel || 0) + '/2';
+  if (tot) tot.textContent = c.ffa + c.teams + (c.duel || 0);
 });
+socket.on('duelFull', () => {  // el duelo ya tiene 2 jugadores
+  const m = D('lobby-msg');
+  if (m) { m.textContent = '⚔️ El duelo ya está lleno (2/2). Probá otro modo o esperá.'; m.classList.remove('hidden'); }
+  sfx.playLocal('empty', 0.5);
+});
+socket.on('returnLobby', () => { returnToLobby(); }); // fin del duelo → al lobby
 socket.on('pongcheck', (t) => { pingMs = Math.round(performance.now() - t); });
 setInterval(() => { if (joined) socket.emit('pingcheck', performance.now()); }, 2000);
 socket.on('damaged', (d) => { flashDamage(); sfx.playLocal('damaged', 0.8); showDamageDir(d && d.from); });
@@ -343,9 +351,9 @@ function buildWorld(map) {
   const size = map.size, half = size / 2;
   obstacles = map.obstacles;
   const theme = map.theme || 'arena';
-  const accent = theme === 'frente' ? 0xff7a3c : 0x33d6ff;  // color neón por mapa
-  const accent2 = theme === 'frente' ? 0xffb37a : 0x6fe6ff;
-  const floorCol = theme === 'frente' ? 0x4a3a30 : 0x394452;
+  const accent = theme === 'frente' ? 0xff7a3c : theme === 'duelo' ? 0xff4d6d : 0x33d6ff;  // color neón por mapa
+  const accent2 = theme === 'frente' ? 0xffb37a : theme === 'duelo' ? 0xff8aa0 : 0x6fe6ff;
+  const floorCol = theme === 'frente' ? 0x4a3a30 : theme === 'duelo' ? 0x33303c : 0x394452;
 
   // ---- limpiar el mundo anterior (cambio de mapa) ----
   if (worldGroup) { scene.remove(worldGroup); disposeGroup(worldGroup); }
@@ -434,7 +442,7 @@ function buildWorld(map) {
   add(dust);
 
   // ---- muros perimetrales con franja luminosa ----
-  const wallMat = new THREE.MeshStandardMaterial({ color: theme === 'frente' ? 0x4a4038 : 0x38424f, roughness: .85 });
+  const wallMat = new THREE.MeshStandardMaterial({ color: theme === 'frente' ? 0x4a4038 : theme === 'duelo' ? 0x3a3340 : 0x38424f, roughness: .85 });
   const h = 8, t = 2;
   for (const [wx, wz, ww, wd] of [[0, half, size, t], [0, -half, size, t], [half, 0, t, size], [-half, 0, t, size]]) {
     addBox(wx, h / 2, wz, ww, h, wd, wallMat);
@@ -1567,9 +1575,10 @@ function setMode(m, byUser) {
   chosenMode = m;
   currentMode = m;
   if (byUser) modePicked = true;
-  const ffa = D('mode-ffa'), team = D('mode-teams');
+  const ffa = D('mode-ffa'), team = D('mode-teams'), duel = D('mode-duel');
   if (ffa) ffa.classList.toggle('selected', m === 'ffa');
   if (team) team.classList.toggle('selected', m === 'teams');
+  if (duel) duel.classList.toggle('selected', m === 'duel');
 }
 
 // Marcador por equipos (arriba) — solo visible en modo equipos
@@ -1583,6 +1592,37 @@ function updateTeamHud(s) {
   D('ts-b').textContent = ts.B;
   D('team-a').classList.toggle('mine', myTeam === 'A');
   D('team-b').classList.toggle('mine', myTeam === 'B');
+}
+
+// Interfaz del modo Duelo (espera / marcador de rondas / resultado)
+function updateDuelUI(s) {
+  const hud = D('duel-hud'), ov = D('duel-overlay');
+  if (!hud || !ov) return;
+  if (s.mode !== 'duel' || !s.duel) { hud.classList.add('hidden'); ov.classList.add('hidden'); return; }
+  const d = s.duel;
+  const me = d.scores.find(x => x.id === selfId), opp = d.scores.find(x => x.id !== selfId);
+  const myWins = me ? me.wins : 0, oppWins = opp ? opp.wins : 0;
+  if (d.state === 'playing') {
+    hud.classList.remove('hidden'); ov.classList.add('hidden');
+    D('duel-score').innerHTML = `TÚ <b>${myWins}</b> &nbsp;–&nbsp; <b>${oppWins}</b> ${opp ? esc(opp.name) : 'RIVAL'}`;
+    D('duel-round').textContent = `Ronda ${d.round}/${d.total}`;
+    return;
+  }
+  hud.classList.add('hidden'); ov.classList.remove('hidden');
+  const sec = Math.ceil((d.countdown || 0) / 1000);
+  let title = '', sub = '';
+  if (d.state === 'waiting') {
+    title = '⏳ Esperando oponente…';
+    sub = `${d.scores.length}/2 jugadores · el duelo empieza cuando se conecten 2`;
+  } else if (d.state === 'roundover') {
+    title = `Ronda ${d.round}: ganó ${esc(d.lastWinner || '—')}`;
+    sub = `Marcador ${myWins} – ${oppWins} · próxima ronda en ${sec}s`;
+  } else if (d.state === 'matchover') {
+    title = !d.winnerId ? '🤝 ¡Empate!' : (d.winnerId === selfId ? '🏆 ¡Ganaste el duelo!' : '💀 Perdiste el duelo');
+    sub = `Resultado ${myWins} – ${oppWins} · volviendo al lobby en ${sec}s`;
+  }
+  D('duel-title').innerHTML = title;
+  D('duel-sub').textContent = sub;
 }
 
 function showToast(msg) {
@@ -1856,7 +1896,8 @@ function setupInput() {
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(0.05, clock.getDelta());
-  inputOn = joined && selfAlive && (pointerLocked || (isMobile && !menuOpen));
+  const duelFrozen = latest.mode === 'duel' && latest.duel && latest.duel.state !== 'playing';
+  inputOn = joined && selfAlive && !duelFrozen && (pointerLocked || (isMobile && !menuOpen));
 
   // métricas de rendimiento (FPS/ping) y marcador en vivo
   frames++; perfAcc += dt;
@@ -1992,9 +2033,10 @@ function animate() {
   });
 
   // selector de modo de juego
-  const mffa = D('mode-ffa'), mteam = D('mode-teams');
+  const mffa = D('mode-ffa'), mteam = D('mode-teams'), mduel = D('mode-duel');
   if (mffa) mffa.onclick = () => { sfx.init(); sfx.playLocal('ui', 0.4); setMode('ffa', true); };
   if (mteam) mteam.onclick = () => { sfx.init(); sfx.playLocal('ui', 0.4); setMode('teams', true); };
+  if (mduel) mduel.onclick = () => { sfx.init(); sfx.playLocal('ui', 0.4); setMode('duel', true); };
   setMode('ffa'); // por defecto
 
   D('play-btn').onclick = () => {

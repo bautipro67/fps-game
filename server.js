@@ -110,6 +110,20 @@ const OBST_TEAMS = [
 const SPAWNS_TEAMS_A = [{ x: 0, z: 45 }, { x: -8, z: 43 }, { x: 8, z: 43 }, { x: -16, z: 41 }, { x: 16, z: 41 }, { x: 0, z: 38 }];
 const SPAWNS_TEAMS_B = [{ x: 0, z: -45 }, { x: -8, z: -43 }, { x: 8, z: -43 }, { x: -16, z: -41 }, { x: 16, z: -41 }, { x: 0, z: -38 }];
 
+// --- Mapa 3: ARENA DE DUELO (1 vs 1) — compacto y simétrico, dos lados ---
+const OBST_DUEL = [
+  { x: 0, z: 0, w: 7, d: 7, h: 4 },
+  { x: -14, z: 0, w: 3, d: 10, h: 3.5 }, { x: 14, z: 0, w: 3, d: 10, h: 3.5 },
+  { x: 0, z: 14, w: 10, d: 2, h: 3 }, { x: 0, z: -14, w: 10, d: 2, h: 3 },
+  { x: -22, z: 18, w: 4, d: 4, h: 3 }, { x: 22, z: 18, w: 4, d: 4, h: 3 },
+  { x: -22, z: -18, w: 4, d: 4, h: 3 }, { x: 22, z: -18, w: 4, d: 4, h: 3 },
+  { x: -10, z: 28, w: 3, d: 3, h: 2.5 }, { x: 10, z: 28, w: 3, d: 3, h: 2.5 },
+  { x: -10, z: -28, w: 3, d: 3, h: 2.5 }, { x: 10, z: -28, w: 3, d: 3, h: 2.5 },
+  { x: -28, z: 0, w: 2, d: 22, h: 4 }, { x: 28, z: 0, w: 2, d: 22, h: 4 },
+];
+const DUEL_SPAWN_A = { x: 0, z: 40 };
+const DUEL_SPAWN_B = { x: 0, z: -40 };
+
 function buildAABBs(obst) {
   return obst.map(o => ({ minx: o.x - o.w / 2, maxx: o.x + o.w / 2, minz: o.z - o.d / 2, maxz: o.z + o.d / 2, miny: 0, maxy: o.h }));
 }
@@ -143,7 +157,19 @@ const MAPS = {
     medkitSpawns: [{ id: 'm0', x: 0, z: 30 }, { id: 'm1', x: 0, z: -30 }, { id: 'm2', x: 26, z: 0 }, { id: 'm3', x: -26, z: 0 }],
     ammocrates: [{ x: 26, z: 8 }, { x: -26, z: -8 }],
   },
+  duel: {
+    theme: 'duelo',
+    obstacles: OBST_DUEL, aabbs: buildAABBs(OBST_DUEL), spawns: [DUEL_SPAWN_A, DUEL_SPAWN_B],
+    jumppads: [], powerPos: { x: 0, z: 0, minY: 999 }, // sin power-up en el duelo
+    pickupSpawns: [{ id: 'p0', x: -8, z: 0, weapon: 'sniper' }, { id: 'p1', x: 8, z: 0, weapon: 'shotgun' }],
+    medkitSpawns: [{ id: 'm0', x: 0, z: 9 }, { id: 'm1', x: 0, z: -9 }],
+    ammocrates: [{ x: -20, z: 0 }, { x: 20, z: 0 }],
+  },
 };
+const DUEL_ROUNDS = 5;
+const DUEL_ROUND_GAP = 3500;    // pausa entre rondas
+const DUEL_END_GAP = 6000;      // mostrar resultado antes de volver al lobby
+const DUEL_ROUND_INVULN = 1500; // breve inmunidad al empezar la ronda
 
 // ------------------------------ Utilidades ----------------------------------
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -275,7 +301,19 @@ function createGame(mode) {
   if (mode === 'teams') assignTeams(g);
   return g;
 }
-const games = { ffa: createGame('ffa'), teams: createGame('teams') };
+function createDuelGame() {
+  const map = MAPS.duel;
+  return {
+    mode: 'duel', map, bots: [],
+    pickups: map.pickupSpawns.map(p => ({ ...p, active: true, respawnAt: 0 })),
+    medkits: map.medkitSpawns.map(m => ({ ...m, active: true, respawnAt: 0 })),
+    drops: [], dropSeq: 0, power: { active: false, respawnAt: Infinity }, teamScore: { A: 0, B: 0 },
+    matchEnd: 0, phase: 'playing',
+    duelState: 'waiting', round: 0, total: DUEL_ROUNDS, sides: {}, timer: 0,
+    lastWinnerName: null, finalWinnerId: null,
+  };
+}
+const games = { ffa: createGame('ffa'), teams: createGame('teams'), duel: createDuelGame() };
 const gameOf = (p) => games[p.mode] || games.ffa;
 
 // ----------------------------- Daño y muertes -------------------------------
@@ -309,7 +347,7 @@ function handleKill(g, victimType, victim) {
         killer.kills = (killer.kills || 0) + 1;
         killer.streak = (killer.streak || 0) + 1;
         killerName = killer.name; killerTeam = killer.team;
-        if ([3, 5, 8, 10, 15, 20].includes(killer.streak)) {
+        if (g.mode !== 'duel' && [3, 5, 8, 10, 15, 20].includes(killer.streak)) {
           io.to(g.mode).emit('announce', { text: `🔥 ${killer.name} lleva una racha de ${killer.streak}` });
         }
       }
@@ -321,15 +359,18 @@ function handleKill(g, victimType, victim) {
     if (g.mode === 'teams' && killerTeam) g.teamScore[killerTeam] += points;
   }
   io.to(g.mode).emit('killfeed', { killer: killerName, victim: victim.name || 'BOT', victimType, head: !!(by && by.head) });
-  victim.respawnAt = Date.now() + (victimType === 'player' ? PLAYER_RESPAWN : BOT_RESPAWN);
   if (victimType === 'player') {
     victim.deaths = (victim.deaths || 0) + 1;
     victim.streak = 0;
+    if (g.mode === 'duel') return; // el duelo maneja la muerte por rondas (sin respawn ni death-screen)
+    victim.respawnAt = Date.now() + PLAYER_RESPAWN;
     io.to(victim.id).emit('died', { by: killerName });
-  }
-  if (victimType === 'bot' && Math.random() < 0.45) {
-    g.drops.push({ id: 'drop' + (g.dropSeq++), x: victim.x, z: victim.z, weapon: victim.weapon, until: Date.now() + 12000 });
-    if (g.drops.length > 10) g.drops.shift();
+  } else {
+    victim.respawnAt = Date.now() + BOT_RESPAWN;
+    if (Math.random() < 0.45) {
+      g.drops.push({ id: 'drop' + (g.dropSeq++), x: victim.x, z: victim.z, weapon: victim.weapon, until: Date.now() + 12000 });
+      if (g.drops.length > 10) g.drops.shift();
+    }
   }
 }
 
@@ -346,6 +387,7 @@ function respawnPlayer(g, p) {
 function handleShot(g, shooter, weaponKey, origin, rays) {
   const w = WEAPONS[weaponKey];
   if (!w) return [];
+  if (g.mode === 'duel' && g.duelState !== 'playing') return []; // sin daño fuera de la ronda
   const results = [];
   const ps = playersIn(g);
   const list = rays.slice(0, w.pellets);
@@ -495,6 +537,103 @@ function updateGame(g, dt) {
   broadcastState(g);
 }
 
+// --------------------------- Modo Duelo (1 vs 1) ----------------------------
+function duelSpawn(side) { return side === 'A' ? DUEL_SPAWN_A : DUEL_SPAWN_B; }
+
+function startDuelMatch(g) {
+  const ps = playersIn(g);
+  if (ps.length < 2) { g.duelState = 'waiting'; return; }
+  g.sides = {}; g.sides[ps[0].id] = 'A'; g.sides[ps[1].id] = 'B';
+  for (const p of ps) { p.duelWins = 0; p.score = 0; p.kills = 0; p.deaths = 0; }
+  g.round = 0; g.finalWinnerId = null;
+  startDuelRound(g);
+}
+function startDuelRound(g) {
+  g.round++;
+  g.duelState = 'playing';
+  for (const p of playersIn(g)) {
+    const s = duelSpawn(g.sides[p.id] || 'A');
+    p.x = s.x; p.z = s.z; p.y = 0; p.health = PLAYER_HP; p.alive = true;
+    p.weapon = p.startWeapon; p.lastHurtBy = null;
+    p.invulnUntil = Date.now() + DUEL_ROUND_INVULN;
+    io.to(p.id).emit('respawn', { x: p.x, y: p.y, z: p.z, weapon: p.weapon });
+  }
+  for (const pk of g.pickups) { pk.active = true; pk.respawnAt = 0; }
+  g.drops = [];
+  io.to('duel').emit('announce', { text: `🎯 Ronda ${g.round} de ${g.total} — ¡pelea!` });
+}
+function endDuelRound(g, winnerId) {
+  const ps = playersIn(g);
+  const winner = players.get(winnerId);
+  if (winner) { winner.duelWins = (winner.duelWins || 0) + 1; g.lastWinnerName = winner.name; }
+  const needed = Math.floor(g.total / 2) + 1; // 3 de 5
+  const champ = ps.find(p => (p.duelWins || 0) >= needed);
+  if (champ || g.round >= g.total) {
+    g.duelState = 'matchover';
+    let win = ps[0];
+    for (const p of ps) if ((p.duelWins || 0) > (win?.duelWins || 0)) win = p;
+    // empate (puede pasar si se jugaron las 5 y quedan iguales): sin ganador
+    const tie = ps.length === 2 && (ps[0].duelWins || 0) === (ps[1].duelWins || 0);
+    g.finalWinnerId = tie ? null : (win ? win.id : null);
+    g.timer = Date.now() + DUEL_END_GAP;
+  } else {
+    g.duelState = 'roundover';
+    g.timer = Date.now() + DUEL_ROUND_GAP;
+  }
+}
+function resetDuel(g) {
+  g.duelState = 'waiting'; g.round = 0; g.sides = {}; g.finalWinnerId = null; g.lastWinnerName = null; g.timer = 0;
+  g.drops = [];
+  for (const pk of g.pickups) { pk.active = true; pk.respawnAt = 0; }
+  for (const mk of g.medkits) { mk.active = true; mk.respawnAt = 0; }
+}
+function expelDuelPlayers(g) {
+  for (const p of playersIn(g)) {
+    io.to(p.id).emit('returnLobby', {});
+    const sock = io.sockets.sockets.get(p.id);
+    if (sock) sock.leave('duel');
+    players.delete(p.id);
+  }
+  resetDuel(g);
+  sendCounts();
+}
+function updateDuel(g, dt) {
+  const now = Date.now();
+  const ps = playersIn(g);
+  if (g.duelState === 'playing') {
+    const dead = ps.find(p => !p.alive);
+    if (dead && ps.length === 2) {
+      const winnerId = ps.find(p => p.id !== dead.id).id;
+      endDuelRound(g, winnerId);
+    }
+    for (const pk of g.pickups) if (!pk.active && now >= pk.respawnAt) pk.active = true;
+    for (const mk of g.medkits) if (!mk.active && now >= mk.respawnAt) mk.active = true;
+    if (g.drops.length) g.drops = g.drops.filter(d => d.until > now);
+  } else if (g.duelState === 'roundover') {
+    if (now >= g.timer) startDuelRound(g);
+  } else if (g.duelState === 'matchover') {
+    if (now >= g.timer) expelDuelPlayers(g);
+  }
+  broadcastDuelState(g);
+}
+function broadcastDuelState(g) {
+  const ps = playersIn(g);
+  const scores = ps.map(p => ({ id: p.id, name: p.name, wins: p.duelWins || 0 }));
+  const fw = g.finalWinnerId ? players.get(g.finalWinnerId) : null;
+  const duel = {
+    state: g.duelState, round: g.round, total: g.total, needed: 2,
+    scores, lastWinner: g.lastWinnerName,
+    countdown: (g.duelState === 'roundover' || g.duelState === 'matchover') ? Math.max(0, g.timer - Date.now()) : 0,
+    winnerId: g.finalWinnerId, winnerName: fw ? fw.name : (g.duelState === 'matchover' ? 'Empate' : null),
+  };
+  io.to('duel').emit('state', {
+    players: ps.map(playerObj), bots: [], pickups: g.pickups.map(p => ({ id: p.id, x: p.x, z: p.z, weapon: p.weapon, active: p.active })),
+    medkits: g.medkits.map(m => ({ id: m.id, x: m.x, z: m.z, active: m.active })),
+    drops: g.drops.map(d => ({ id: d.id, x: d.x, z: d.z, weapon: d.weapon, until: d.until })),
+    leaderId: null, power: { active: false }, mode: 'duel', teamScore: { A: 0, B: 0 }, duel, timeLeft: 0, phase: 'playing',
+  });
+}
+
 let last = Date.now();
 setInterval(() => {
   const now = Date.now();
@@ -502,16 +641,20 @@ setInterval(() => {
   last = now;
   updateGame(games.ffa, dt);
   updateGame(games.teams, dt);
+  updateDuel(games.duel, dt);
 }, TICK_MS);
 
+function playerObj(p) {
+  return { id: p.id, name: p.name, x: p.x, y: p.y, z: p.z, ry: p.ry, health: p.health,
+    maxHealth: PLAYER_HP, weapon: p.weapon, score: p.score, alive: p.alive, deaths: p.deaths || 0,
+    kills: p.kills || 0, streak: p.streak || 0, boosted: Date.now() < (p.boostUntil || 0),
+    team: p.team, protected: Date.now() < (p.invulnUntil || 0) };
+}
 function broadcastState(g) {
   const ps = [];
   let leaderId = null, ls = 0;
   for (const p of playersIn(g)) {
-    ps.push({ id: p.id, name: p.name, x: p.x, y: p.y, z: p.z, ry: p.ry, health: p.health,
-      maxHealth: PLAYER_HP, weapon: p.weapon, score: p.score, alive: p.alive, deaths: p.deaths || 0,
-      kills: p.kills || 0, streak: p.streak || 0, boosted: Date.now() < (p.boostUntil || 0),
-      team: p.team, protected: Date.now() < (p.invulnUntil || 0) });
+    ps.push(playerObj(p));
     if (p.score > ls) { ls = p.score; leaderId = p.id; }
   }
   const bs = g.bots.map(b => ({ id: b.id, x: b.x, y: b.y, z: b.z, ry: b.ry, health: b.health, maxHealth: BOT_HP, alive: b.alive, weapon: b.weapon, team: b.team }));
@@ -523,9 +666,9 @@ function broadcastState(g) {
 
 // Contadores de jugadores por modo (para el lobby)
 function modeCounts() {
-  let ffa = 0, teams = 0;
-  for (const [, p] of players) { if (p.mode === 'teams') teams++; else ffa++; }
-  return { ffa, teams };
+  let ffa = 0, teams = 0, duel = 0;
+  for (const [, p] of players) { if (p.mode === 'teams') teams++; else if (p.mode === 'duel') duel++; else ffa++; }
+  return { ffa, teams, duel };
 }
 function sendCounts() { io.emit('counts', modeCounts()); }
 
@@ -535,14 +678,17 @@ io.on('connection', (socket) => {
 
   socket.on('join', (data) => {
     const weapon = WEAPONS[data?.weapon]?.starter ? data.weapon : 'pistol';
-    const mode = data?.mode === 'teams' ? 'teams' : 'ffa';
+    let mode = data?.mode;
+    if (mode !== 'teams' && mode !== 'duel') mode = 'ffa';
+    // Duelo: capacidad máxima 2 — si ya están los dos, no se puede unir
+    if (mode === 'duel' && playersIn(games.duel).length >= 2) { socket.emit('duelFull', {}); return; }
     const g = games[mode];
-    socket.leave('ffa'); socket.leave('teams'); socket.join(mode); // enrutar a la sala del modo
+    socket.leave('ffa'); socket.leave('teams'); socket.leave('duel'); socket.join(mode);
     const s = spawnPoint(g);
     const p = {
       id: socket.id, name: (String(data?.name || 'Jugador')).slice(0, 16) || 'Jugador', mode,
       x: s.x, y: 0, z: s.z, ry: 0, health: PLAYER_HP, alive: true,
-      weapon, startWeapon: weapon, score: 0, deaths: 0, kills: 0, streak: 0, lastHurtBy: null, lastShot: 0,
+      weapon, startWeapon: weapon, score: 0, deaths: 0, kills: 0, streak: 0, duelWins: 0, lastHurtBy: null, lastShot: 0,
       invulnUntil: Date.now() + SPAWN_PROTECT, team: null,
       god: String(data?.name || '').trim() === '6767',
     };
@@ -556,6 +702,8 @@ io.on('connection', (socket) => {
       weapons: WEAPONS, spawn: { x: p.x, y: p.y, z: p.z }, weapon, mode,
       timeLeft: Math.max(0, g.matchEnd - Date.now()), phase: g.phase,
     });
+    // Duelo: si ya están los 2, arranca la partida; si no, queda esperando
+    if (mode === 'duel') { if (playersIn(g).length >= 2) startDuelMatch(g); else g.duelState = 'waiting'; }
   });
 
   socket.on('input', (d) => {
@@ -616,7 +764,22 @@ io.on('connection', (socket) => {
 
   function leaveGame() {
     const p = players.get(socket.id);
-    if (p) { socket.to(p.mode).emit('notify', { text: `👋 ${p.name} salió de la partida`, kind: 'leave' }); players.delete(socket.id); sendCounts(); }
+    if (!p) return;
+    socket.to(p.mode).emit('notify', { text: `👋 ${p.name} salió de la partida`, kind: 'leave' });
+    players.delete(socket.id);
+    if (p.mode === 'duel') {
+      const g = games.duel, rest = playersIn(g);
+      if (g.duelState !== 'waiting' && rest.length < 2) {
+        for (const other of rest) {
+          io.to(other.id).emit('announce', { text: '🏆 Ganaste: tu rival abandonó el duelo' });
+          io.to(other.id).emit('returnLobby', {});
+          const sk = io.sockets.sockets.get(other.id); if (sk) sk.leave('duel');
+          players.delete(other.id);
+        }
+        resetDuel(g);
+      } else if (rest.length === 0) resetDuel(g);
+    }
+    sendCounts();
   }
   socket.on('leave', leaveGame);
   socket.on('disconnect', leaveGame);

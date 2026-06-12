@@ -159,6 +159,20 @@ body.mobile #perf-hud { display: none; }
 .mode-opt .mdesc { font-size: 11px; opacity: .55; margin-top: 3px; }
 .mode-opt .mcount { font-size: 11px; color: var(--green); margin-top: 7px; font-weight: 700; }
 .mode-opt .mcount span { color: #fff; }
+#mode-choices { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+#lobby-msg { color: #ff9a9a; font-size: 13px; margin: -8px 0 14px; font-weight: 600; }
+
+/* HUD del duelo (marcador de rondas) */
+#duel-hud { position: fixed; top: 60px; left: 50%; transform: translateX(-50%); z-index: 16; text-align: center; background: rgba(10,16,24,.7); border: 1px solid rgba(255,77,109,.4); border-radius: 10px; padding: 5px 18px; }
+#duel-score { font-family: 'Orbitron','Rajdhani',sans-serif; font-size: 18px; font-weight: 800; letter-spacing: 1px; }
+#duel-score b { color: var(--accent); }
+#duel-round { font-size: 12px; opacity: .7; letter-spacing: 1px; }
+
+/* Overlay del duelo (espera / ronda / resultado) */
+#duel-overlay { position: fixed; inset: 0; z-index: 25; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+#duel-overlay .duel-card { background: rgba(10,14,22,.82); border: 1px solid rgba(255,77,109,.45); border-radius: 16px; padding: 26px 44px; text-align: center; box-shadow: 0 16px 50px rgba(0,0,0,.6); backdrop-filter: blur(3px); }
+#duel-overlay h2 { font-family: 'Orbitron','Rajdhani',sans-serif; font-size: 30px; letter-spacing: 2px; }
+#duel-overlay p { opacity: .8; margin-top: 12px; font-size: 15px; }
 
 /* Marcador por equipos (en partida) */
 #team-scores { position: fixed; top: 60px; left: 50%; transform: translateX(-50%); z-index: 16; display: flex; align-items: center; gap: 12px; }

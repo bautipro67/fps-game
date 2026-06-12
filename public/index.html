@@ -59,6 +59,13 @@
       <div class="team-vs">VS</div>
       <div id="team-b" class="team-box b"><span id="ts-b">0</span> 🔴</div>
     </div>
+    <div id="duel-hud" class="hidden">
+      <div id="duel-score"></div>
+      <div id="duel-round"></div>
+    </div>
+    <div id="duel-overlay" class="hidden">
+      <div class="duel-card"><h2 id="duel-title"></h2><p id="duel-sub"></p></div>
+    </div>
     <div id="perf-hud"></div>
     <div id="hitmarker" class="hidden">✕</div>
     <div id="damage-flash"></div>
@@ -161,7 +168,9 @@
       <div id="mode-choices">
         <div id="mode-ffa" class="mode-opt"><div class="micon">⚔️</div><div class="mname">Todos contra todos</div><div class="mdesc">Cada uno por su cuenta</div><div class="mcount">🟢 <span id="count-ffa">0</span> jugando</div></div>
         <div id="mode-teams" class="mode-opt"><div class="micon">🛡️</div><div class="mname">Batalla en equipos</div><div class="mdesc">2 equipos · gana el de más puntos</div><div class="mcount">🟢 <span id="count-teams">0</span> jugando</div></div>
+        <div id="mode-duel" class="mode-opt"><div class="micon">🤺</div><div class="mname">Duelo 1v1</div><div class="mdesc">2 jugadores · 5 rondas</div><div class="mcount">🟢 <span id="count-duel">0/2</span></div></div>
       </div>
+      <p id="lobby-msg" class="hidden"></p>
       <p class="choose">Elige tu arma inicial</p>
       <div id="weapon-choices"></div>
       <button id="play-btn" disabled>ELEGÍ UN ARMA</button>
