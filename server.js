@@ -258,10 +258,11 @@ function spawnPoint(g, team) {
   }
   return m.spawns[Math.floor(Math.random() * m.spawns.length)];
 }
-function spawnBot(g, i) {
+let botSeq = 0;
+function spawnBot(g) {
   const s = spawnPoint(g);
   return {
-    id: 'bot' + i, name: 'BOT', x: s.x, y: 0, z: s.z, ry: Math.random() * Math.PI * 2,
+    id: 'bot' + (botSeq++), name: 'BOT', x: s.x, y: 0, z: s.z, ry: Math.random() * Math.PI * 2,
     health: BOT_HP, alive: true, target: null, wander: randomWander(g.map), weapon: randomBotWeapon(),
     lastShot: 0, respawnAt: 0, lastHurtBy: null, stuck: 0, detourUntil: 0, detourDir: { x: 0, z: 0 },
     strafe: 1, strafeFlip: 0, team: null,
@@ -297,9 +298,22 @@ function createGame(mode) {
     teamScore: { A: 0, B: 0 },
     matchEnd: Date.now() + MATCH_DURATION, phase: 'playing',
   };
-  for (let i = 0; i < BOT_COUNT; i++) g.bots.push(spawnBot(g, i));
+  for (let i = 0; i < BOT_COUNT; i++) g.bots.push(spawnBot(g));
   if (mode === 'teams') assignTeams(g);
   return g;
+}
+
+// Ajusta la cantidad de bots: total combatientes ≈ BOT_COUNT.
+// Cada jugador que entra "ocupa el lugar" de un bot; al salir, el bot vuelve.
+function adjustBots(g) {
+  if (!g || g.mode === 'duel') return;
+  const desired = Math.max(0, BOT_COUNT - playersIn(g).length);
+  while (g.bots.length > desired) {                 // quitar (preferir bots muertos)
+    const di = g.bots.findIndex(b => !b.alive);
+    g.bots.splice(di >= 0 ? di : g.bots.length - 1, 1);
+  }
+  while (g.bots.length < desired) g.bots.push(spawnBot(g)); // reponer
+  if (g.mode === 'teams') g.bots.forEach((b, idx) => { b.team = idx % 2 === 0 ? 'A' : 'B'; });
 }
 function createDuelGame() {
   const map = MAPS.duel;
@@ -694,6 +708,7 @@ io.on('connection', (socket) => {
     };
     players.set(socket.id, p);
     if (mode === 'teams') { p.team = smallerTeam(g); const sp2 = spawnPoint(g, p.team); p.x = sp2.x; p.z = sp2.z; }
+    if (mode !== 'duel') adjustBots(g); // el jugador ocupa el lugar de un bot
     socket.to(mode).emit('notify', { text: `👋 ${p.name} se unió a la partida`, kind: 'join' });
     sendCounts();
     socket.emit('init', {
@@ -778,6 +793,8 @@ io.on('connection', (socket) => {
         }
         resetDuel(g);
       } else if (rest.length === 0) resetDuel(g);
+    } else {
+      adjustBots(games[p.mode]); // al salir el jugador, vuelve un bot
     }
     sendCounts();
   }

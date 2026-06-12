@@ -833,7 +833,7 @@ function syncEntities() {
   for (const b of latest.bots) upsert(b.id, 0xc0392b, true, b);
 
   for (const [id, e] of entities) {
-    if (!seen.has(id)) { scene.remove(e.group); entities.delete(id); }
+    if (!seen.has(id)) { scene.remove(e.group); disposeGroup(e.group); entities.delete(id); }
   }
 }
 
