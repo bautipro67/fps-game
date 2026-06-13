@@ -1,6 +1,6 @@
 // Service worker de la PWA: instala la "shell" y sirve offline lo estático.
 // No intercepta socket.io (el multijugador necesita la red).
-const CACHE = 'fps-arena-v12';
+const CACHE = 'fps-arena-v13';
 const ASSETS = [
   '/', '/index.html', '/css/style.css',
   '/js/main.js', '/js/audio.js',

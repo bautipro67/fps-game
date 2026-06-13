@@ -330,3 +330,96 @@ td:nth-child(3) { color: var(--accent); font-weight: 700; }
 #prompt-pickup { position: fixed; left: 50%; top: 62%; transform: translateX(-50%); background: rgba(0,0,0,.7); padding: 8px 18px; border-radius: 8px; font-size: 15px; z-index: 18; border: 1px solid rgba(248,197,55,.4); }
 #prompt-pickup b { color: var(--accent); }
 #pickup-name { color: var(--accent); font-weight: 700; }
+
+/* ============================================================
+   RESPONSIVE — el lobby y el HUD se adaptan a cada pantalla
+   (PC y móvil). El objetivo: que todo se vea bien y no se corte.
+   ============================================================ */
+
+/* Lobby fluido: el título escala y la tarjeta nunca se desborda */
+.menu-card { max-height: 94vh; overflow-y: auto; overflow-x: hidden; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
+.menu-card h1 { font-size: clamp(30px, 7vw, 46px); }
+.subtitle { font-size: clamp(12px, 3vw, 15px); }
+#play-btn { touch-action: manipulation; }
+
+/* ---- MÓVIL: vida y munición ARRIBA, para dejar abajo libre a los
+   controles táctiles (joystick y botones) y que nada se tape ---- */
+body.mobile #hud-bottom-left { left: 12px; bottom: auto; top: 116px; }
+body.mobile #health-wrap { width: 150px; height: 18px; }
+body.mobile #health-text { font-size: 12px; }
+body.mobile #hud-bottom-right { right: 12px; bottom: auto; top: 62px; padding: 5px 13px 7px; }
+body.mobile #weapon-name { font-size: 12px; }
+body.mobile #ammo { font-size: 26px; }
+body.mobile #ammo-sep, body.mobile #ammo-res { font-size: 15px; }
+body.mobile #minimap { width: 92px; height: 92px; top: 12px; left: 12px; }
+body.mobile #killfeed { top: 118px; right: 10px; font-size: 11px; gap: 4px; }
+body.mobile #hud-top { top: 8px; gap: 12px; padding: 4px 12px; }
+body.mobile .controls-help { display: none; }            /* sin ayuda de teclado en móvil */
+body.mobile #prompt-pickup { top: 58%; font-size: 13px; }
+
+/* ---- Tablets y pantallas medianas ---- */
+@media (max-width: 820px) {
+  .menu-card { padding: 26px 22px; }
+  #health-wrap { width: 200px; }
+  #ammo { font-size: 36px; }
+  #hud-top { gap: 16px; padding: 7px 16px; }
+  #timer { font-size: 22px; }
+  #minimap { width: 124px; height: 124px; }
+  #killfeed { font-size: 13px; }
+}
+
+/* ---- Teléfonos: todo más compacto y legible ---- */
+@media (max-width: 560px) {
+  .menu-card { padding: 20px 15px; border-radius: 13px; }
+  .menu-card h1 { letter-spacing: 2px; }
+  .subtitle { margin-bottom: 16px; }
+  .online-row { margin: -10px 0 14px; }
+  .field { margin-bottom: 14px; }
+  .choose { margin-bottom: 9px; }
+  #weapon-choices { gap: 8px; margin-bottom: 16px; }
+  .weapon-opt { padding: 11px 6px; }
+  .weapon-opt .wname { font-size: 13.5px; }
+  .weapon-opt .wtag { font-size: 10px; min-height: 24px; margin: 2px 0 8px; }
+  .weapon-opt .wbar span { width: 42px; }
+  #mode-choices { gap: 8px; margin-bottom: 16px; }
+  .mode-opt { padding: 11px 8px; }
+  .mode-opt .micon { font-size: 22px; margin-bottom: 4px; }
+  .mode-opt .mname { font-size: 13px; }
+  .mode-opt .mdesc { font-size: 10px; }
+  #play-btn { padding: 13px; font-size: 17px; }
+
+  /* HUDs de modo (arriba al centro) más chicos para que no se corten */
+  #jugg-hud { width: min(300px, 74vw); top: 44px; }
+  #jugg-timer { font-size: 16px; }
+  #jugg-bar { height: 17px; }
+  #jugg-bar-label { line-height: 17px; font-size: 10px; }
+  #jugg-objective { font-size: 10.5px; }
+  #duel-hud { top: 48px; padding: 4px 13px; }
+  #duel-score { font-size: 15px; }
+  #duel-round { font-size: 11px; }
+  #team-scores { top: 50px; gap: 8px; }
+  .team-box { font-size: 17px; padding: 4px 11px; }
+  #notify { top: 112px; font-size: 12.5px; padding: 6px 14px; }
+  #boost-indicator, #protect-indicator { top: 92px; font-size: 12px; padding: 5px 14px; }
+
+  /* Overlays de resultado / muerte compactos */
+  #duel-overlay .duel-card, #jugg-overlay .jugg-card { padding: 20px 22px; }
+  #duel-overlay h2, #jugg-overlay h2 { font-size: 23px; }
+  #duel-overlay p, #jugg-overlay p { font-size: 13px; }
+  .death-card h1, .gameover-card h1 { font-size: 30px; }
+  #scoreboard { min-width: 0; width: 94vw; padding: 18px 16px; }
+  th, td { padding: 6px 7px; font-size: 13px; }
+}
+
+/* ---- Pantallas BAJAS (teléfono en horizontal): compacta lo de arriba ---- */
+@media (max-height: 470px) {
+  .menu-card { max-height: 96vh; padding: 14px 18px; }
+  .menu-card h1 { font-size: clamp(22px, 6vw, 32px); margin-bottom: 2px; }
+  .subtitle { margin-bottom: 10px; }
+  .field { margin-bottom: 10px; }
+  #weapon-choices, #mode-choices { margin-bottom: 10px; }
+  .weapon-opt .wtag { display: none; }                   /* ahorra altura */
+  body.mobile #minimap { width: 78px; height: 78px; }
+  body.mobile #hud-bottom-left { top: 100px; }
+  body.mobile #killfeed { top: 102px; }
+}

@@ -215,35 +215,42 @@ setInterval(() => {
 function initThree() {
   scene = new THREE.Scene();
   scene.background = makeGradientSky();
-  scene.fog = new THREE.Fog(0x9fc0d8, 80, 175);
+  // móvil: niebla apenas más corta (no afecta la visibilidad del mapa)
+  scene.fog = new THREE.Fog(0x9fc0d8, isMobile ? 72 : 80, isMobile ? 165 : 175);
 
-  camera = new THREE.PerspectiveCamera(78, innerWidth / innerHeight, 0.1, 600);
+  camera = new THREE.PerspectiveCamera(78, innerWidth / innerHeight, 0.1, isMobile ? 420 : 600);
 
-  renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  // móvil: sin antialias (caro en GPU móvil); la menor resolución ya suaviza
+  renderer = new THREE.WebGLRenderer({ antialias: !isMobile, powerPreference: 'high-performance' });
   renderer.setSize(innerWidth, innerHeight);
-  renderer.setPixelRatio(Math.min(1.5, devicePixelRatio)); // menos píxeles = más fluido
-  renderer.shadowMap.enabled = true;
+  // móvil: renderiza a ~1x (los teléfonos suelen ser 2x–3x → enorme ahorro de píxeles)
+  renderer.setPixelRatio(isMobile ? Math.min(1, devicePixelRatio) : Math.min(1.6, devicePixelRatio));
+  renderer.shadowMap.enabled = !isMobile;           // móvil: sin sombras proyectadas (gran ahorro)
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
   D('game').appendChild(renderer.domElement);
 
-  // entorno IBL: reflejos suaves en metales (bots, armas, pilares)
-  try {
-    const pmrem = new THREE.PMREMGenerator(renderer);
-    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-  } catch (e) { /* sin entorno IBL */ }
+  // entorno IBL: reflejos suaves en metales — se omite en móvil (sombreado más barato)
+  if (!isMobile) {
+    try {
+      const pmrem = new THREE.PMREMGenerator(renderer);
+      scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    } catch (e) { /* sin entorno IBL */ }
+  }
 
-  scene.add(new THREE.HemisphereLight(0xcfe3f2, 0x3a4452, 1.2));
+  scene.add(new THREE.HemisphereLight(0xcfe3f2, 0x3a4452, isMobile ? 1.45 : 1.2)); // móvil: hemisférica más fuerte (compensa la falta de IBL)
   const sun = new THREE.DirectionalLight(0xfff3df, 1.25);
   sun.position.set(55, 95, 35);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024); // sombra más liviana
-  const c = sun.shadow.camera;
-  c.left = -75; c.right = 75; c.top = 75; c.bottom = -75; c.near = 1; c.far = 260;
+  if (!isMobile) {
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(1024, 1024); // sombra más liviana
+    const c = sun.shadow.camera;
+    c.left = -75; c.right = 75; c.top = 75; c.bottom = -75; c.near = 1; c.far = 260;
+  }
   scene.add(sun);
   // pool FIJO de luces de efecto: evita recompilar shaders al crear/destruir luces
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < (isMobile ? 1 : 3); i++) {       // móvil: menos luces dinámicas
     const pl = new THREE.PointLight(0xffffff, 0, 10);
     pl.userData.t = 0; pl.userData.max = 1; pl.userData.peak = 0;
     effectLights.push(pl); scene.add(pl);

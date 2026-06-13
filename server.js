@@ -139,13 +139,15 @@ const SPAWNS_JUGG = [
   { x: 28, z: 8 }, { x: -28, z: 8 }, { x: 8, z: 28 }, { x: 8, z: -28 },
 ];
 const JUGG_CENTER = { x: 0, z: 0 };
-const JUGG_ROUND_MS = 75000;     // tiempo para eliminar al gigante
+const JUGG_ROUND_MS = 60000;     // tiempo para eliminar al gigante (menos = más fácil sobrevivir)
 const JUGG_GAP = 6500;           // pausa entre rondas (mostrar resultado)
-const JUGG_BASE_HP = 600;        // vida base del gigante
-const JUGG_HP_PER_HUNTER = 90;   // + vida por cada cazador (escala con la cantidad)
-const JUGG_DMG_MULT = 2.4;       // el gigante pega mucho más fuerte
-const JUGG_SCALE = 1.8;          // tamaño visual y hitbox del gigante
-const JUGG_SPEED_MULT = 0.9;     // un poco más lento por ser enorme
+const JUGG_BASE_HP = 1000;       // vida base del gigante
+const JUGG_HP_PER_HUNTER = 150;  // + vida por cada cazador (escala con la cantidad)
+const JUGG_DMG_MULT = 2.9;       // el gigante pega muchísimo más fuerte
+const JUGG_SCALE = 1.85;         // tamaño visual y hitbox del gigante
+const JUGG_SPEED_MULT = 1.12;    // MÁS rápido que los cazadores (puede perseguir y escapar)
+const JUGG_REGEN = 0.045;        // regenera 4.5% de su vida máx por segundo si no lo golpean
+const JUGG_REGEN_DELAY = 2200;   // ms sin recibir daño para empezar a regenerar
 
 function buildAABBs(obst) {
   return obst.map(o => ({ minx: o.x - o.w / 2, maxx: o.x + o.w / 2, minz: o.z - o.d / 2, maxz: o.z + o.d / 2, miny: 0, maxy: o.h }));
@@ -399,6 +401,7 @@ function applyDamage(g, type, ent, dmg, attacker, head = false) {
   }
   ent.health -= dmg;
   ent.lastHurtBy = { id: attacker.id, isPlayer: attacker.isPlayer, head };
+  ent.lastHurtAt = Date.now();
   if (type === 'player') {
     let from = null;
     if (attacker.isPlayer) { const a = players.get(attacker.id); if (a) from = { x: a.x, z: a.z }; }
@@ -847,6 +850,10 @@ function updateJugg(g, dt) {
     else if (now >= g.roundEnd) endJuggRound(g, 'giant');    // se acabó el tiempo → gana el gigante
     else {
       updateJuggBots(g, dt);
+      // Regeneración del gigante: si no lo golpean por un rato, recupera vida (gran ventaja)
+      if (giant && now - (giant.lastHurtAt || 0) > JUGG_REGEN_DELAY && giant.health < g.juggHP) {
+        giant.health = Math.min(g.juggHP, giant.health + g.juggHP * JUGG_REGEN * dt);
+      }
       for (const p of playersIn(g)) if (!p.alive && !p.isJugg && now >= p.respawnAt) respawnPlayer(g, p);
       for (const pk of g.pickups) if (!pk.active && now >= pk.respawnAt) pk.active = true;
       for (const mk of g.medkits) if (!mk.active && now >= mk.respawnAt) mk.active = true;
