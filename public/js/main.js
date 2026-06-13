@@ -964,11 +964,11 @@ function interpEntities(dt) {
         const s = Math.sin(e.walkPhase) * Math.min(0.7, 0.12 + sp * 0.05);
         w.legL.rotation.x = s; w.legR.rotation.x = -s;
         w.armL.rotation.x = -s; w.armR.rotation.x = s;
-        e.avatar.position.y = Math.abs(Math.sin(e.walkPhase)) * Math.min(0.07, 0.02 + sp * 0.006); // rebote
-        e.avatar.rotation.x = -Math.min(0.13, sp * 0.013);                                          // inclinación al correr
+        // rebote vertical sutil, en fase con los pasos (cuerpo alto cuando las piernas se cruzan)
+        e.avatar.position.y = Math.abs(Math.cos(e.walkPhase)) * Math.min(0.045, 0.015 + sp * 0.003);
       } else {
         for (const part of [w.legL, w.legR, w.armL, w.armR]) part.rotation.x *= 0.8;
-        e.avatar.position.y *= 0.85; e.avatar.rotation.x *= 0.85;
+        e.avatar.position.y *= 0.8;
       }
     }
     // pasos audibles de los demás (conciencia espacial)
