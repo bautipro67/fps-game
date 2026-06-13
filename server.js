@@ -149,41 +149,55 @@ const JUGG_SPEED_MULT = 1.12;    // MÁS rápido que los cazadores (puede perseg
 const JUGG_REGEN = 0.045;        // regenera 4.5% de su vida máx por segundo si no lo golpean
 const JUGG_REGEN_DELAY = 2200;   // ms sin recibir daño para empezar a regenerar
 
-// --- Mapa 5: TORMENTA (Battle Royale) — MUCHO más grande, 20 combatientes ---
-const BR_HALF = 95;                            // semieje del mapa (190x190, ~3.6x más grande)
+// --- Mapa 5: TORMENTA (Battle Royale) — ENORME, 20 combatientes muy separados ---
+const BR_HALF = 150;                           // semieje del mapa (300x300, ~9x el mapa normal)
 const OBST_BR = (() => {
-  const o = [{ x: 0, z: 0, w: 10, d: 10, h: 8 }];          // torre central
-  for (const [rad, n] of [[24, 5], [48, 8], [70, 11]]) {   // anillos de coberturas (clusters)
+  const o = [{ x: 0, z: 0, w: 12, d: 12, h: 9 }];          // torre central
+  for (const [rad, n] of [[30, 5], [60, 8], [92, 11], [124, 13]]) { // anillos de coberturas
     for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2 + rad * 0.013;
+      const a = (i / n) * Math.PI * 2 + rad * 0.01;
       const cx = Math.round(Math.cos(a) * rad), cz = Math.round(Math.sin(a) * rad);
-      o.push({ x: cx, z: cz, w: 7, d: 7, h: 5.5 });
-      o.push({ x: cx + 8, z: cz + 3, w: 3, d: 9, h: 3.5 });
-      o.push({ x: cx - 5, z: cz - 7, w: 9, d: 2.5, h: 3 });
+      o.push({ x: cx, z: cz, w: 8, d: 8, h: 6 });
+      o.push({ x: cx + 9, z: cz + 3, w: 3, d: 10, h: 3.5 });
+      o.push({ x: cx - 6, z: cz - 8, w: 10, d: 2.5, h: 3 });
     }
   }
   return o;
 })();
-const SPAWNS_BR = (() => {                       // 24 spawns en un anillo exterior despejado
-  const s = [];
-  for (let i = 0; i < 24; i++) { const a = (i / 24) * Math.PI * 2; s.push({ x: Math.round(Math.cos(a) * 86), z: Math.round(Math.sin(a) * 86) }); }
+const brBlocked = (x, z, m = 3) => OBST_BR.some(o => Math.abs(x - o.x) < o.w / 2 + m && Math.abs(z - o.z) < o.d / 2 + m);
+// Spawns MUY separados: grilla dispersa por todo el mapa (vecinos a ~52u, fuera del rango de visión 45)
+const SPAWNS_BR = (() => {
+  const s = [], step = 52, lim = BR_HALF - 16;
+  for (let gx = -lim; gx <= lim; gx += step) for (let gz = -lim; gz <= lim; gz += step) {
+    const x = Math.round(gx + (Math.random() - 0.5) * 14), z = Math.round(gz + (Math.random() - 0.5) * 14);
+    const d = Math.hypot(x, z);
+    if (d > BR_HALF - 10 || d < 18 || brBlocked(x, z, 2)) continue;
+    s.push({ x, z });
+  }
   return s;
 })();
 const PICKUPS_BR = (() => {                       // armas repartidas por el mapa grande
   const p = [], w = ['rifle', 'smg', 'shotgun', 'sniper']; let id = 0;
-  for (const [rad, n] of [[36, 6], [60, 8]]) for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2 + 0.35; p.push({ id: 'p' + (id), x: Math.round(Math.cos(a) * rad), z: Math.round(Math.sin(a) * rad), weapon: w[id++ % w.length] }); }
+  for (const [rad, n] of [[52, 7], [92, 9], [128, 8]]) for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 + 0.35, x = Math.round(Math.cos(a) * rad), z = Math.round(Math.sin(a) * rad);
+    if (!brBlocked(x, z)) p.push({ id: 'p' + id, x, z, weapon: w[id++ % w.length] });
+  }
   return p;
 })();
 const MEDKITS_BR = (() => {
-  const m = []; for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2 + 0.2; m.push({ id: 'm' + i, x: Math.round(Math.cos(a) * 42), z: Math.round(Math.sin(a) * 42) }); }
+  const m = []; let id = 0;
+  for (const [rad, n] of [[60, 6], [116, 8]]) for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 + 0.2, x = Math.round(Math.cos(a) * rad), z = Math.round(Math.sin(a) * rad);
+    if (!brBlocked(x, z)) m.push({ id: 'm' + (id++), x, z });
+  }
   return m;
 })();
 const BR_TOTAL = 20;             // combatientes al inicio (jugadores + bots)
 const BR_START_WAIT = 10000;     // 10 s de espera antes de iniciar (con ≥1 jugador)
 const BR_END_GAP = 9000;         // mostrar resultado antes de volver al lobby
-const BR_STORM_GRACE = 12000;    // al inicio la tormenta no avanza (apenas cubre los bordes)
-const BR_STORM_TIME = 150000;    // tiempo en cerrarse del todo hacia el centro
-const BR_SAFE_START = 138;       // radio seguro inicial (cubre todo el mapa)
+const BR_STORM_GRACE = 15000;    // al inicio la tormenta no avanza (apenas cubre los bordes)
+const BR_STORM_TIME = 240000;    // 4 min en cerrarse del todo (partidas más largas)
+const BR_SAFE_START = 218;       // radio seguro inicial (cubre el mapa enorme entero)
 const BR_SAFE_END = 6;           // radio seguro final (chiquito, en el centro)
 
 function buildAABBs(obst) {
