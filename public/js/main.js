@@ -24,6 +24,7 @@ let pointerLocked = false;
 let weapons = {};            // config recibida del servidor
 let obstacles = [];          // para colisión en el cliente
 let EYE = 1.7;
+let mapHalf = 50;            // semieje del mapa actual (varía por modo; BR es más grande)
 
 let latest = { players: [], bots: [], pickups: [], medkits: [], drops: [], leaderId: null, power: { active: false }, timeLeft: 0, phase: 'playing' };
 let selfAlive = true;
@@ -79,6 +80,7 @@ const effectLights = [];
 let lightIdx = 0;
 let jumpPads = [], dust = null, powerMesh = null;
 let worldGroup = null, builtTheme = null;              // para reconstruir el mundo al cambiar de mapa
+let stormMesh = null;                                  // muro de la tormenta (Battle Royale)
 const padRings = [];                                   // anillos ascendentes de los jump pads
 let AMMO_CRATES = [{ x: 27, z: 27 }, { x: -27, z: -27 }]; // cajas de munición (las define el mapa)
 const ammoCrateMeshes = [];
@@ -86,6 +88,7 @@ let ammoCd = 0;
 let boostUntil = 0;                                    // mi power-up de daño x2
 let myTeam = null;                                     // 'A' | 'B' | null (FFA)
 let myJugg = false;                                    // ¿soy el gigante en Juggernaut?
+let brEliminated = false, brPlace = 0;                 // Battle Royale: ¿me eliminaron? y en qué puesto
 const TEAM_COLOR = { A: 0x3b82f6, B: 0xe0483b };       // azul / rojo
 const ALLY = 0x39d98a, ENEMY = 0xff5a5a;               // verde aliado / rojo enemigo
 let chosenMode = 'ffa', currentMode = 'ffa', modePicked = false; // selección de modo en el lobby
@@ -110,6 +113,8 @@ socket.on('init', (data) => {
   weapons = data.weapons;
   if (data.mode) currentMode = data.mode;
   EYE = data.map.eye;
+  mapHalf = data.map.half || 50;
+  brEliminated = false; brPlace = 0;
   local.x = data.spawn.x; local.z = data.spawn.z; local.feetY = 0;
   setWeapon(data.weapon, true);
   if (!worldBuilt) { initThree(); buildWorld(data.map); worldBuilt = true; builtTheme = data.map.theme; }
@@ -132,6 +137,7 @@ socket.on('state', (s) => {
   updateTeamHud(s);                                                          // marcador por equipos
   updateDuelUI(s);                                                           // interfaz del duelo 1v1
   updateJuggUI(s);                                                           // interfaz del Juggernaut
+  updateBRUI(s);                                                             // interfaz del Battle Royale
   myJugg = !!(s.jugg && s.jugg.juggId === selfId);                          // ¿soy el gigante?
   if (!joined && !modePicked && s.mode) setMode(s.mode);                     // en el lobby, refleja el modo activo
   const me = s.players.find(p => p.id === selfId);
@@ -176,19 +182,27 @@ socket.on('announce', (d) => { showToast(d.text); sfx.playLocal('multi', 0.45); 
 socket.on('notify', (d) => { showNotify(d.text); sfx.playLocal(d.kind === 'join' ? 'pickup' : 'ui', 0.5); });
 socket.on('boost', (d) => { boostUntil = performance.now() + d.ms; sfx.playLocal('power', 0.8); showToast('⚡ DAÑO x2'); });
 socket.on('counts', (c) => {  // contadores de jugadores por modo (lobby)
-  const a = D('count-ffa'), b = D('count-teams'), du = D('count-duel'), ju = D('count-jugg'), tot = D('online-count');
+  const a = D('count-ffa'), b = D('count-teams'), du = D('count-duel'), ju = D('count-jugg'), brc = D('count-br'), tot = D('online-count');
   if (a) a.textContent = c.ffa;
   if (b) b.textContent = c.teams;
   if (du) du.textContent = (c.duel || 0) + '/2';
   if (ju) ju.textContent = (c.juggernaut || 0);
-  if (tot) tot.textContent = c.ffa + c.teams + (c.duel || 0) + (c.juggernaut || 0);
+  if (brc) brc.textContent = (c.br || 0);
+  if (tot) tot.textContent = c.ffa + c.teams + (c.duel || 0) + (c.juggernaut || 0) + (c.br || 0);
 });
 socket.on('duelFull', () => {  // el duelo ya tiene 2 jugadores
   const m = D('lobby-msg');
   if (m) { m.textContent = '⚔️ El duelo ya está lleno (2/2). Probá otro modo o esperá.'; m.classList.remove('hidden'); }
   sfx.playLocal('empty', 0.5);
 });
-socket.on('returnLobby', () => { returnToLobby(); }); // fin del duelo → al lobby
+socket.on('returnLobby', () => { returnToLobby(); }); // fin del duelo / BR → al lobby
+socket.on('brLocked', () => {  // el Battle Royale ya empezó (o está lleno)
+  const m = D('lobby-msg');
+  if (m) { m.textContent = '🌀 El Battle Royale ya está en curso. Esperá a la próxima partida.'; m.classList.remove('hidden'); }
+  sfx.playLocal('empty', 0.5);
+});
+socket.on('brEliminated', (d) => { brEliminated = true; brPlace = d.place; sfx.playLocal('death', 0.9); });
+socket.on('brWin', () => { sfx.playLocal('multi', 0.9); });
 socket.on('pongcheck', (t) => { pingMs = Math.round(performance.now() - t); });
 setInterval(() => { if (joined) socket.emit('pingcheck', performance.now()); }, 2000);
 socket.on('damaged', (d) => { flashDamage(); sfx.playLocal('damaged', 0.8); showDamageDir(d && d.from); });
@@ -366,9 +380,9 @@ function buildWorld(map) {
   const size = map.size, half = size / 2;
   obstacles = map.obstacles;
   const theme = map.theme || 'arena';
-  const accent = theme === 'frente' ? 0xff7a3c : theme === 'duelo' ? 0xff4d6d : theme === 'coliseo' ? 0xffc24d : 0x33d6ff;  // color neón por mapa
-  const accent2 = theme === 'frente' ? 0xffb37a : theme === 'duelo' ? 0xff8aa0 : theme === 'coliseo' ? 0xffe0a0 : 0x6fe6ff;
-  const floorCol = theme === 'frente' ? 0x4a3a30 : theme === 'duelo' ? 0x33303c : theme === 'coliseo' ? 0x4a4030 : 0x394452;
+  const accent = theme === 'frente' ? 0xff7a3c : theme === 'duelo' ? 0xff4d6d : theme === 'coliseo' ? 0xffc24d : theme === 'tormenta' ? 0xb06bff : 0x33d6ff;  // color neón por mapa
+  const accent2 = theme === 'frente' ? 0xffb37a : theme === 'duelo' ? 0xff8aa0 : theme === 'coliseo' ? 0xffe0a0 : theme === 'tormenta' ? 0xd6b3ff : 0x6fe6ff;
+  const floorCol = theme === 'frente' ? 0x4a3a30 : theme === 'duelo' ? 0x33303c : theme === 'coliseo' ? 0x4a4030 : theme === 'tormenta' ? 0x2f3140 : 0x394452;
 
   // ---- limpiar el mundo anterior (cambio de mapa) ----
   if (worldGroup) { scene.remove(worldGroup); disposeGroup(worldGroup); }
@@ -377,7 +391,7 @@ function buildWorld(map) {
   for (const [, m] of pickupMeshes) scene.remove(m); pickupMeshes.clear();
   for (const [, m] of medkitMeshes) scene.remove(m); medkitMeshes.clear();
   for (const [, m] of dropMeshes) scene.remove(m); dropMeshes.clear();
-  powerMesh = null; dust = null;
+  powerMesh = null; dust = null; stormMesh = null;
   AMMO_CRATES = map.ammocrates || AMMO_CRATES;
   const add = (o) => worldGroup.add(o);
 
@@ -435,6 +449,13 @@ function buildWorld(map) {
   pbeam.position.y = 10; powerMesh.add(pbeam);
   powerMesh.position.set(0, 7.0, 0); add(powerMesh);
 
+  // ---- muro de la tormenta (Battle Royale): cilindro que se cierra hacia el centro ----
+  if (theme === 'tormenta') {
+    const sg = new THREE.CylinderGeometry(1, 1, 80, 56, 1, true);
+    stormMesh = new THREE.Mesh(sg, new THREE.MeshBasicMaterial({ color: 0xb06bff, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }));
+    stormMesh.position.y = 35; stormMesh.visible = false; add(stormMesh);
+  }
+
   // ---- cajas de munición ----
   for (const a of AMMO_CRATES) {
     const g = new THREE.Group();
@@ -457,7 +478,7 @@ function buildWorld(map) {
   add(dust);
 
   // ---- muros perimetrales con franja luminosa ----
-  const wallMat = new THREE.MeshStandardMaterial({ color: theme === 'frente' ? 0x4a4038 : theme === 'duelo' ? 0x3a3340 : theme === 'coliseo' ? 0x5b5040 : 0x38424f, roughness: .85 });
+  const wallMat = new THREE.MeshStandardMaterial({ color: theme === 'frente' ? 0x4a4038 : theme === 'duelo' ? 0x3a3340 : theme === 'coliseo' ? 0x5b5040 : theme === 'tormenta' ? 0x3c3b4a : 0x38424f, roughness: .85 });
   const h = 8, t = 2;
   for (const [wx, wz, ww, wd] of [[0, half, size, t], [0, -half, size, t], [half, 0, t, size], [-half, 0, t, size]]) {
     addBox(wx, h / 2, wz, ww, h, wd, wallMat);
@@ -1234,7 +1255,7 @@ function killPopup(points, head) {
 let miniCv = null, miniCtx = null;
 function drawMinimap() {
   if (!miniCtx) { miniCv = D('minimap'); if (!miniCv) return; miniCtx = miniCv.getContext('2d'); }
-  const S = miniCv.width, half = 50, sc = S / (half * 2);
+  const S = miniCv.width, half = mapHalf, sc = S / (half * 2);
   const X = (wx) => (wx + half) * sc, Z = (wz) => (wz + half) * sc;
   const c = miniCtx;
   c.clearRect(0, 0, S, S);
@@ -1283,6 +1304,11 @@ function drawMinimap() {
     if (age >= 1) { shotPings.splice(i, 1); continue; }
     c.fillStyle = `rgba(255,140,50,${(0.8 * (1 - age)).toFixed(2)})`;
     c.beginPath(); c.arc(X(sp2.x), Z(sp2.z), 2 + age * 3, 0, 7); c.fill();
+  }
+  // Battle Royale: círculo de la zona segura (la tormenta está afuera)
+  if (latest.br && latest.br.stormR) {
+    c.strokeStyle = 'rgba(180,110,255,0.95)'; c.lineWidth = 2;
+    c.beginPath(); c.arc(X(0), Z(0), latest.br.stormR * sc, 0, 7); c.stroke(); c.lineWidth = 1;
   }
   // yo (triángulo orientado)
   camera.getWorldDirection(_dir);
@@ -1378,8 +1404,9 @@ function updatePlayer(dt) {
   local.z += _mv.z * speed * dt;
 
   const r = resolveCollision(local.x, local.z, 0.5, local.feetY);
-  local.x = Math.max(-49, Math.min(49, r.x));
-  local.z = Math.max(-49, Math.min(49, r.z));
+  const lim = mapHalf - 1;
+  local.x = Math.max(-lim, Math.min(lim, r.x));
+  local.z = Math.max(-lim, Math.min(lim, r.z));
 
   const wasOnGround = local.onGround;
   const prevFeet = local.feetY;
@@ -1605,11 +1632,12 @@ function setMode(m, byUser) {
   chosenMode = m;
   currentMode = m;
   if (byUser) modePicked = true;
-  const ffa = D('mode-ffa'), team = D('mode-teams'), duel = D('mode-duel'), jug = D('mode-jugg');
+  const ffa = D('mode-ffa'), team = D('mode-teams'), duel = D('mode-duel'), jug = D('mode-jugg'), br = D('mode-br');
   if (ffa) ffa.classList.toggle('selected', m === 'ffa');
   if (team) team.classList.toggle('selected', m === 'teams');
   if (duel) duel.classList.toggle('selected', m === 'duel');
   if (jug) jug.classList.toggle('selected', m === 'juggernaut');
+  if (br) br.classList.toggle('selected', m === 'br');
 }
 
 // Marcador por equipos (arriba) — solo visible en modo equipos
@@ -1684,6 +1712,41 @@ function updateJuggUI(s) {
   else { title = iAmGiant ? '🏆 ¡Sobreviviste! Ganaste' : '👹 El Juggernaut sobrevivió'; cls = iAmGiant ? 'win' : 'lose'; }
   const t = D('jugg-ov-title'); t.textContent = title; t.className = cls;
   D('jugg-ov-sub').textContent = `Próxima ronda en ${sec}s…`;
+}
+
+// Interfaz del Battle Royale (vivos + tormenta + espera/eliminado/victoria)
+function brBtn(show) { const x = D('br-lobby-btn'); if (x) x.classList.toggle('hidden', !show); }
+function updateBRUI(s) {
+  const hud = D('br-hud'), ov = D('br-overlay');
+  if (!hud || !ov) return;
+  if (s.mode !== 'br' || !s.br) { hud.classList.add('hidden'); ov.classList.add('hidden'); return; }
+  const b = s.br;
+  if (b.state === 'playing') {
+    hud.classList.remove('hidden');
+    D('br-alive').textContent = `🪂 Vivos ${b.alive}/${b.total}`;
+    D('br-warn').classList.toggle('hidden', !document.body.classList.contains('instorm'));
+  } else hud.classList.add('hidden');
+  const T = D('br-ov-title'), Sub = D('br-ov-sub'); T.className = '';
+  const sec = Math.max(0, Math.ceil((b.countdown || 0) / 1000));
+  if (b.state === 'over') {
+    const iWon = b.winnerId === selfId;
+    T.textContent = iWon ? '🏆 ¡GANASTE EL BATTLE ROYALE!' : `🏆 Ganó ${esc(b.winnerName || '—')}`;
+    if (iWon) T.className = 'win';
+    Sub.textContent = `Volviendo al lobby en ${sec}s…`;
+    brBtn(false); ov.classList.remove('hidden');
+  } else if (b.state === 'playing' && brEliminated) {
+    T.textContent = '☠️ ELIMINADO'; T.className = 'lose';
+    Sub.textContent = `Puesto #${brPlace} de ${b.total} · quedan ${b.alive} vivos`;
+    brBtn(true); ov.classList.remove('hidden');
+  } else if (b.state === 'countdown') {
+    T.textContent = '⏳ La partida está por empezar';
+    Sub.textContent = `Empieza en ${sec}s · ${b.waiting} jugador(es) · se completa con bots hasta ${b.total}`;
+    brBtn(false); ov.classList.remove('hidden');
+  } else if (b.state === 'waiting') {
+    T.textContent = '⏳ Esperando jugadores…';
+    Sub.textContent = 'La partida empieza cuando entre al menos un jugador';
+    brBtn(false); ov.classList.remove('hidden');
+  } else ov.classList.add('hidden');
 }
 
 function showToast(msg) {
@@ -1784,7 +1847,8 @@ function setSensitivity(v) {
 
 function returnToLobby() {
   joined = false; menuOpen = false; firing = false; aiming = false; keys.crouch = false; boostUntil = 0; local.sliding = false;
-  touchMove.x = 0; touchMove.y = 0;
+  touchMove.x = 0; touchMove.y = 0; brEliminated = false;
+  document.body.classList.remove('instorm');
   if (controls && pointerLocked) controls.unlock();
   for (const id of ['hud', 'crosshair', 'ingame-menu', 'scoreboard', 'death-screen', 'gameover-screen', 'touch-controls', 'btn-menu'])
     D(id).classList.add('hidden');
@@ -1798,6 +1862,7 @@ function setupMenus() {
   range.addEventListener('input', () => { setSensitivity(parseFloat(range.value)); val.textContent = sensitivity.toFixed(1); });
   D('im-resume').onclick = () => { if (isMobile || usingGamepad) menuOpen = false; else controls.lock(); };
   D('im-lobby').onclick = () => returnToLobby();
+  const blb = D('br-lobby-btn'); if (blb) blb.onclick = () => { socket.emit('leave'); returnToLobby(); };
   const bm = D('btn-menu');
   bm.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
   bm.addEventListener('click', () => { menuOpen = true; });
@@ -2007,7 +2072,8 @@ function animate() {
   if (!usingGamepad && navigator.getGamepads) { for (const p of navigator.getGamepads()) if (p && p.connected) { usingGamepad = true; document.body.classList.add('gamepad'); break; } }
   const duelFrozen = latest.mode === 'duel' && latest.duel && latest.duel.state !== 'playing';
   const juggFrozen = latest.mode === 'juggernaut' && latest.jugg && latest.jugg.state !== 'fighting';
-  inputOn = joined && selfAlive && !duelFrozen && !juggFrozen && (pointerLocked || ((isMobile || usingGamepad) && !menuOpen));
+  const brFrozen = latest.mode === 'br' && latest.br && latest.br.state !== 'playing';
+  inputOn = joined && selfAlive && !duelFrozen && !juggFrozen && !brFrozen && (pointerLocked || ((isMobile || usingGamepad) && !menuOpen));
   pollGamepad(dt);                                                            // leer el control (usa el inputOn recién calculado)
 
   // métricas de rendimiento (FPS/ping) y marcador en vivo
@@ -2035,6 +2101,17 @@ function animate() {
     if (powerMesh) {
       powerMesh.visible = !!(latest.power && latest.power.active);
       powerMesh.rotation.y += dt * 1.5;
+    }
+    // Battle Royale: la tormenta se cierra; tinte de pantalla si estás dentro
+    if (stormMesh) {
+      const br = latest.br;
+      if (br && (br.state === 'playing' || br.state === 'over')) {
+        const r = br.stormR || 100;
+        stormMesh.scale.set(r, 1, r);
+        stormMesh.material.opacity = 0.13 + Math.sin(performance.now() / 360) * 0.05;
+        stormMesh.visible = true;
+        document.body.classList.toggle('instorm', br.state === 'playing' && Math.hypot(local.x, local.z) > r);
+      } else { stormMesh.visible = false; document.body.classList.remove('instorm'); }
     }
     // anillos ascendentes de las plataformas de salto
     for (const r2 of padRings) {
@@ -2144,11 +2221,12 @@ function animate() {
   });
 
   // selector de modo de juego
-  const mffa = D('mode-ffa'), mteam = D('mode-teams'), mduel = D('mode-duel'), mjug = D('mode-jugg');
+  const mffa = D('mode-ffa'), mteam = D('mode-teams'), mduel = D('mode-duel'), mjug = D('mode-jugg'), mbr = D('mode-br');
   if (mffa) mffa.onclick = () => { sfx.init(); sfx.playLocal('ui', 0.4); setMode('ffa', true); };
   if (mteam) mteam.onclick = () => { sfx.init(); sfx.playLocal('ui', 0.4); setMode('teams', true); };
   if (mduel) mduel.onclick = () => { sfx.init(); sfx.playLocal('ui', 0.4); setMode('duel', true); };
   if (mjug) mjug.onclick = () => { sfx.init(); sfx.playLocal('ui', 0.4); setMode('juggernaut', true); };
+  if (mbr) mbr.onclick = () => { sfx.init(); sfx.playLocal('ui', 0.4); setMode('br', true); };
   setMode('ffa'); // por defecto
 
   D('play-btn').onclick = () => {

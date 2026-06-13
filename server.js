@@ -149,6 +149,43 @@ const JUGG_SPEED_MULT = 1.12;    // MÁS rápido que los cazadores (puede perseg
 const JUGG_REGEN = 0.045;        // regenera 4.5% de su vida máx por segundo si no lo golpean
 const JUGG_REGEN_DELAY = 2200;   // ms sin recibir daño para empezar a regenerar
 
+// --- Mapa 5: TORMENTA (Battle Royale) — MUCHO más grande, 20 combatientes ---
+const BR_HALF = 95;                            // semieje del mapa (190x190, ~3.6x más grande)
+const OBST_BR = (() => {
+  const o = [{ x: 0, z: 0, w: 10, d: 10, h: 8 }];          // torre central
+  for (const [rad, n] of [[24, 5], [48, 8], [70, 11]]) {   // anillos de coberturas (clusters)
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + rad * 0.013;
+      const cx = Math.round(Math.cos(a) * rad), cz = Math.round(Math.sin(a) * rad);
+      o.push({ x: cx, z: cz, w: 7, d: 7, h: 5.5 });
+      o.push({ x: cx + 8, z: cz + 3, w: 3, d: 9, h: 3.5 });
+      o.push({ x: cx - 5, z: cz - 7, w: 9, d: 2.5, h: 3 });
+    }
+  }
+  return o;
+})();
+const SPAWNS_BR = (() => {                       // 24 spawns en un anillo exterior despejado
+  const s = [];
+  for (let i = 0; i < 24; i++) { const a = (i / 24) * Math.PI * 2; s.push({ x: Math.round(Math.cos(a) * 86), z: Math.round(Math.sin(a) * 86) }); }
+  return s;
+})();
+const PICKUPS_BR = (() => {                       // armas repartidas por el mapa grande
+  const p = [], w = ['rifle', 'smg', 'shotgun', 'sniper']; let id = 0;
+  for (const [rad, n] of [[36, 6], [60, 8]]) for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2 + 0.35; p.push({ id: 'p' + (id), x: Math.round(Math.cos(a) * rad), z: Math.round(Math.sin(a) * rad), weapon: w[id++ % w.length] }); }
+  return p;
+})();
+const MEDKITS_BR = (() => {
+  const m = []; for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2 + 0.2; m.push({ id: 'm' + i, x: Math.round(Math.cos(a) * 42), z: Math.round(Math.sin(a) * 42) }); }
+  return m;
+})();
+const BR_TOTAL = 20;             // combatientes al inicio (jugadores + bots)
+const BR_START_WAIT = 10000;     // 10 s de espera antes de iniciar (con ≥1 jugador)
+const BR_END_GAP = 9000;         // mostrar resultado antes de volver al lobby
+const BR_STORM_GRACE = 12000;    // al inicio la tormenta no avanza (apenas cubre los bordes)
+const BR_STORM_TIME = 150000;    // tiempo en cerrarse del todo hacia el centro
+const BR_SAFE_START = 138;       // radio seguro inicial (cubre todo el mapa)
+const BR_SAFE_END = 6;           // radio seguro final (chiquito, en el centro)
+
 function buildAABBs(obst) {
   return obst.map(o => ({ minx: o.x - o.w / 2, maxx: o.x + o.w / 2, minz: o.z - o.d / 2, maxz: o.z + o.d / 2, miny: 0, maxy: o.h }));
 }
@@ -201,6 +238,14 @@ const MAPS = {
     ],
     medkitSpawns: [{ id: 'm0', x: 24, z: 0 }, { id: 'm1', x: -24, z: 0 }, { id: 'm2', x: 0, z: 24 }, { id: 'm3', x: 0, z: -24 }],
     ammocrates: [{ x: 36, z: 36 }, { x: -36, z: -36 }],
+  },
+  br: {
+    theme: 'tormenta', half: BR_HALF,
+    obstacles: OBST_BR, aabbs: buildAABBs(OBST_BR), spawns: SPAWNS_BR,
+    jumppads: [], powerPos: { x: 0, z: 0, minY: 999 }, // sin power-up
+    pickupSpawns: PICKUPS_BR,
+    medkitSpawns: MEDKITS_BR,
+    ammocrates: [{ x: 30, z: 30 }, { x: -30, z: -30 }, { x: 30, z: -30 }, { x: -30, z: 30 }],
   },
 };
 const DUEL_ROUNDS = 5;
@@ -260,20 +305,22 @@ function resolve(obst, px, pz, r) {
   }
   return { x: px, z: pz };
 }
-function pointClear(obst, x, z, r) {
-  if (x < -49 || x > 49 || z < -49 || z > 49) return false;
+function pointClear(obst, x, z, r, bound = 49) {
+  if (x < -bound || x > bound || z < -bound || z > bound) return false;
   for (const o of obst) {
     if (x > o.x - o.w / 2 - r && x < o.x + o.w / 2 + r && z > o.z - o.d / 2 - r && z < o.z + o.d / 2 + r) return false;
   }
   return true;
 }
+const mapBound = (map) => (map.half || 50) - 1;   // límite jugable del mapa (±)
 // Rumbo para esquivar: si el camino recto está libre, va recto; si no, rodea el
 // obstáculo SIEMPRE por el mismo lado (seguimiento de pared) en vez de zigzaguear.
 function avoidDir(map, b, dx, dz) {
   const base = Math.atan2(dx, dz), probe = 4.0, clr = 0.9;
+  const bd = mapBound(map);
   const ok = (ang) => {
     const tx = b.x + Math.sin(ang) * probe, tz = b.z + Math.cos(ang) * probe;
-    return pointClear(map.obstacles, tx, tz, clr) && !segBlocked(map.aabbs, b.x, b.z, tx, tz);
+    return pointClear(map.obstacles, tx, tz, clr, bd) && !segBlocked(map.aabbs, b.x, b.z, tx, tz);
   };
   if (ok(base)) { b.avoidSide = 0; return { x: Math.sin(base), z: Math.cos(base) }; } // recto libre
   if (!b.avoidSide) b.avoidSide = Math.random() < 0.5 ? 1 : -1;                        // fijar un lado
@@ -293,11 +340,12 @@ function turnToward(cur, want, maxStep) {
   return cur + clamp(d, -maxStep, maxStep);
 }
 function randomWander(map) {
+  const r = mapBound(map) - 3;
   for (let i = 0; i < 10; i++) {
-    const x = rand(-46, 46), z = rand(-46, 46);
-    if (pointClear(map.obstacles, x, z, 1.5)) return { x, z };
+    const x = rand(-r, r), z = rand(-r, r);
+    if (pointClear(map.obstacles, x, z, 1.5, mapBound(map))) return { x, z };
   }
-  return { x: rand(-46, 46), z: rand(-46, 46) };
+  return { x: rand(-r, r), z: rand(-r, r) };
 }
 
 // --------------------------- Estado del juego -------------------------------
@@ -359,7 +407,7 @@ function createGame(mode) {
 // Ajusta la cantidad de bots: total combatientes ≈ BOT_COUNT.
 // Cada jugador que entra "ocupa el lugar" de un bot; al salir, el bot vuelve.
 function adjustBots(g) {
-  if (!g || g.mode === 'duel') return;
+  if (!g || g.mode === 'duel' || g.mode === 'br') return; // duelo y BR manejan sus propios bots
   const desired = Math.max(0, BOT_COUNT - playersIn(g).length);
   while (g.bots.length > desired) {                 // quitar (preferir muertos; nunca al gigante)
     let di = g.bots.findIndex(b => !b.alive && !b.isJugg);
@@ -389,7 +437,19 @@ function createJuggGame() {
   startJuggRound(g);
   return g;
 }
-const games = { ffa: createGame('ffa'), teams: createGame('teams'), duel: createDuelGame(), juggernaut: createJuggGame() };
+function createBRGame() {
+  const map = MAPS.br;
+  return {
+    mode: 'br', map, bots: [],
+    pickups: map.pickupSpawns.map(p => ({ ...p, active: true, respawnAt: 0 })),
+    medkits: map.medkitSpawns.map(m => ({ ...m, active: true, respawnAt: 0 })),
+    drops: [], dropSeq: 0, power: { active: false, respawnAt: Infinity }, teamScore: { A: 0, B: 0 },
+    matchEnd: 0, phase: 'playing',
+    brState: 'waiting', timer: 0, stormR: BR_SAFE_START, stormStart: 0, matchStart: 0,
+    brWinnerId: null, brWinnerName: null, brTotal: BR_TOTAL,
+  };
+}
+const games = { ffa: createGame('ffa'), teams: createGame('teams'), duel: createDuelGame(), juggernaut: createJuggGame(), br: createBRGame() };
 const gameOf = (p) => games[p.mode] || games.ffa;
 
 // ----------------------------- Daño y muertes -------------------------------
@@ -402,7 +462,7 @@ function applyDamage(g, type, ent, dmg, attacker, head = false) {
   ent.health -= dmg;
   ent.lastHurtBy = { id: attacker.id, isPlayer: attacker.isPlayer, head };
   ent.lastHurtAt = Date.now();
-  if (type === 'player') {
+  if (type === 'player' && !attacker.isStorm) {           // la tormenta no manda flash (sería cada tick)
     let from = null;
     if (attacker.isPlayer) { const a = players.get(attacker.id); if (a) from = { x: a.x, z: a.z }; }
     else { const a = g.bots.find(b => b.id === attacker.id); if (a) from = { x: a.x, z: a.z }; }
@@ -428,6 +488,8 @@ function handleKill(g, victimType, victim) {
           io.to(g.mode).emit('announce', { text: `🔥 ${killer.name} lleva una racha de ${killer.streak}` });
         }
       }
+    } else if (by.id === 'storm') {
+      killerName = '⛈️ Tormenta';
     } else {
       killerName = 'BOT';
       const kb = g.bots.find(x => x.id === by.id);
@@ -436,6 +498,12 @@ function handleKill(g, victimType, victim) {
     if (g.mode === 'teams' && killerTeam) g.teamScore[killerTeam] += points;
   }
   io.to(g.mode).emit('killfeed', { killer: killerName, victim: victim.name || 'BOT', victimType, head: !!(by && by.head) });
+  if (g.mode === 'br') {                                  // Battle Royale: sin reaparición; registra el puesto
+    const place = brAlive(g) + 1;                         // vivos ahora + el que murió = su puesto
+    victim.brPlace = place;
+    if (victimType === 'player') { victim.deaths = (victim.deaths || 0) + 1; io.to(victim.id).emit('brEliminated', { place, total: g.brTotal, by: killerName }); }
+    return;
+  }
   if (g.mode === 'juggernaut' && victim.isJugg) {        // murió el gigante → ganan los cazadores
     if (victimType === 'player') { victim.deaths = (victim.deaths || 0) + 1; victim.streak = 0; io.to(victim.id).emit('died', { by: killerName, jugg: true }); }
     endJuggRound(g, 'hunters');
@@ -474,6 +542,7 @@ function handleShot(g, shooter, weaponKey, origin, rays) {
   if (!w) return [];
   if (g.mode === 'duel' && g.duelState !== 'playing') return []; // sin daño fuera de la ronda
   if (g.mode === 'juggernaut' && g.juggState !== 'fighting') return [];
+  if (g.mode === 'br' && g.brState !== 'playing') return [];
   const results = [];
   const ps = playersIn(g);
   const list = rays.slice(0, w.pellets);
@@ -561,7 +630,8 @@ function updateBots(g, dt) {
       const a = avoidDir(g.map, b, mvx, mvz);                 // rodea sin zigzag (mantiene el lado)
       const sp = BOT_SPEED * dt;
       const res = resolve(g.map.obstacles, b.x + a.x * sp, b.z + a.z * sp, 0.6);
-      const nx = clamp(res.x, -49, 49), nz = clamp(res.z, -49, 49);
+      const lim = mapBound(g.map);
+      const nx = clamp(res.x, -lim, lim), nz = clamp(res.z, -lim, lim);
       const moved = Math.hypot(nx - b.x, nz - b.z);
       b.x = nx; b.z = nz;
       if (facing !== null) b.ry = facing;                              // en combate: mira al enemigo
@@ -837,7 +907,8 @@ function updateJuggBots(g, dt) {
       const a = avoidDir(g.map, b, mvx, mvz);
       const sp = BOT_SPEED * (b.isJugg ? JUGG_SPEED_MULT : 1) * dt;
       const res = resolve(g.map.obstacles, b.x + a.x * sp, b.z + a.z * sp, b.isJugg ? 1.0 : 0.6);
-      b.x = clamp(res.x, -49, 49); b.z = clamp(res.z, -49, 49);
+      const lim = mapBound(g.map);
+      b.x = clamp(res.x, -lim, lim); b.z = clamp(res.z, -lim, lim);
       if (facing !== null) b.ry = facing; else b.ry = turnToward(b.ry, Math.atan2(a.x, a.z), 7 * dt);
     } else if (facing !== null) b.ry = facing;
   }
@@ -886,6 +957,165 @@ function broadcastJuggState(g) {
   });
 }
 
+// ---------------------- Modo Battle Royale (Tormenta) -----------------------
+function brAlive(g) {
+  let n = 0;
+  for (const p of playersIn(g)) if (p.alive) n++;
+  for (const b of g.bots) if (b.alive) n++;
+  return n;
+}
+function brAliveList(g) {
+  const list = [];
+  for (const p of playersIn(g)) if (p.alive) list.push({ ent: p, type: 'player' });
+  for (const b of g.bots) if (b.alive) list.push({ ent: b, type: 'bot' });
+  return list;
+}
+function stormRadius(g, now) {
+  if (now < g.stormStart) return BR_SAFE_START;
+  const t = Math.min(1, (now - g.stormStart) / BR_STORM_TIME);
+  return BR_SAFE_START + (BR_SAFE_END - BR_SAFE_START) * t;
+}
+function startBRMatch(g) {
+  const now = Date.now();
+  const ps = playersIn(g);
+  g.bots = [];                                            // bots frescos para completar 20
+  const need = Math.max(0, BR_TOTAL - ps.length);
+  for (let i = 0; i < need; i++) g.bots.push(spawnBot(g));
+  const spawns = [...g.map.spawns].sort(() => Math.random() - 0.5);  // repartir spawns
+  let si = 0;
+  const place = (e) => { const s = spawns[si++ % spawns.length]; e.x = s.x; e.z = s.z; e.y = 0; };
+  for (const p of ps) {
+    place(p); p.health = PLAYER_HP; p.alive = true; p.weapon = p.startWeapon; p.lastHurtBy = null;
+    p.invulnUntil = now + 2500; p.brPlace = 0;
+    io.to(p.id).emit('respawn', { x: p.x, y: 0, z: p.z, weapon: p.weapon });
+  }
+  for (const b of g.bots) { place(b); b.health = BOT_HP; b.alive = true; b.lastHurtBy = null; b.lastSeen = 0; b.avoidSide = 0; b.weapon = randomBotWeapon(); }
+  for (const pk of g.pickups) { pk.active = true; pk.respawnAt = 0; }
+  for (const mk of g.medkits) { mk.active = true; mk.respawnAt = 0; }
+  g.drops = [];
+  g.stormR = BR_SAFE_START; g.stormStart = now + BR_STORM_GRACE; g.matchStart = now;
+  g.brTotal = ps.length + g.bots.length;
+  g.brWinnerId = null; g.brWinnerName = null;
+  g.brState = 'playing';
+  io.to('br').emit('announce', { text: `🪂 ¡Battle Royale! ${g.brTotal} combatientes — el último en pie gana` });
+}
+function endBRMatch(g) {
+  const survivors = brAliveList(g);
+  const w = survivors[0];
+  if (w) w.ent.brPlace = 1;
+  g.brWinnerId = w ? w.ent.id : null;
+  g.brWinnerName = w ? (w.ent.name || 'BOT') : '—';
+  g.brState = 'over';
+  g.timer = Date.now() + BR_END_GAP;
+  if (w && w.type === 'player') io.to(w.ent.id).emit('brWin', {});
+  io.to('br').emit('announce', { text: `🏆 ¡${g.brWinnerName} gana el Battle Royale!` });
+}
+function resetBR(g) {
+  g.brState = 'waiting'; g.bots = []; g.timer = 0; g.stormR = BR_SAFE_START; g.stormStart = 0;
+  g.brWinnerId = null; g.brWinnerName = null; g.drops = [];
+  for (const pk of g.pickups) { pk.active = true; pk.respawnAt = 0; }
+  for (const mk of g.medkits) { mk.active = true; mk.respawnAt = 0; }
+}
+function expelBRPlayers(g) {
+  for (const p of playersIn(g)) {
+    io.to(p.id).emit('returnLobby', {});
+    const sock = io.sockets.sockets.get(p.id);
+    if (sock) sock.leave('br');
+    players.delete(p.id);
+  }
+  resetBR(g);
+  sendCounts();
+}
+function updateBRBots(g, dt) {
+  const now = Date.now();
+  const ps = playersIn(g);
+  const lim = mapBound(g.map);
+  const safe = g.stormR;
+  for (const b of g.bots) {
+    if (!b.alive) continue;                               // sin reaparición
+    const bw = BOT_WEAPONS[b.weapon] || BOT_WEAPONS.rifle;
+    let mvx = 0, mvz = 0, wantMove = false, facing = null;
+    const distC = Math.hypot(b.x, b.z);
+    if (distC > safe - 3) {                               // en la tormenta (o al borde) → correr al centro
+      const d = distC || 1; mvx = -b.x / d; mvz = -b.z / d; wantMove = true; facing = Math.atan2(mvx, mvz);
+    } else {
+      let vis = null, bd = BOT_VISION;                    // buscar enemigo (cualquiera vivo)
+      const consider = (e) => { if (!e.alive || e === b) return; const dx = e.x - b.x, dz = e.z - b.z, dd = Math.hypot(dx, dz); if (dd < bd && !segBlocked(g.map.aabbs, b.x, b.z, e.x, e.z)) { bd = dd; vis = { e, dx, dz, dd }; } };
+      for (const p of ps) consider(p);
+      for (const o of g.bots) consider(o);
+      if (vis) {
+        const inv = 1 / (vis.dd || 1), reach = Math.min(bw.range, BOT_VISION);
+        if (vis.dd > reach * 0.7) { mvx = vis.dx * inv; mvz = vis.dz * inv; wantMove = true; }
+        else if (vis.dd < reach * 0.4) { mvx = -vis.dx * inv; mvz = -vis.dz * inv; wantMove = true; }
+        else { if (now > (b.strafeFlip || 0)) { b.strafe = Math.random() < 0.5 ? 1 : -1; b.strafeFlip = now + 1200 + Math.random() * 1600; } mvx = -vis.dz * inv * b.strafe; mvz = vis.dx * inv * b.strafe; wantMove = true; }
+        facing = Math.atan2(vis.dx, vis.dz);
+        if (vis.dd < bw.range && now - b.lastShot > bw.fireMs) {
+          b.lastShot = now;
+          if (Math.random() < Math.max(0.18, 1 - vis.dd / bw.range) * 0.7) applyDamage(g, players.has(vis.e.id) ? 'player' : 'bot', vis.e, bw.damage, { id: b.id, isPlayer: false });
+          io.to('br').emit('tracer', { x: b.x, y: 1.4, z: b.z, tx: vis.e.x, ty: vis.e.y + 1.2, tz: vis.e.z, weapon: b.weapon });
+        }
+      } else {                                            // vagar, manteniéndose dentro de la zona segura
+        const dx = b.wander.x - b.x, dz = b.wander.z - b.z, dist = Math.hypot(dx, dz);
+        if (dist < 2 || now > (b.wanderUntil || 0) || Math.hypot(b.wander.x, b.wander.z) > safe - 8) {
+          b.wander = randomWander(g.map); b.wanderUntil = now + 5000;
+          if (Math.hypot(b.wander.x, b.wander.z) > safe - 8) { b.wander.x *= 0.5; b.wander.z *= 0.5; } // tirar hacia adentro
+        } else { mvx = dx / dist; mvz = dz / dist; wantMove = true; }
+      }
+    }
+    if (wantMove) {
+      const a = avoidDir(g.map, b, mvx, mvz);
+      const sp = BOT_SPEED * dt;
+      const res = resolve(g.map.obstacles, b.x + a.x * sp, b.z + a.z * sp, 0.6);
+      b.x = clamp(res.x, -lim, lim); b.z = clamp(res.z, -lim, lim);
+      if (facing !== null) b.ry = facing; else b.ry = turnToward(b.ry, Math.atan2(a.x, a.z), 7 * dt);
+    } else if (facing !== null) b.ry = facing;
+  }
+}
+function updateBR(g, dt) {
+  const now = Date.now();
+  const ps = playersIn(g);
+  if (g.brState === 'waiting') {
+    if (ps.length >= 1) { g.brState = 'countdown'; g.timer = now + BR_START_WAIT; io.to('br').emit('announce', { text: '⏳ La partida empieza en 10 s…' }); }
+  } else if (g.brState === 'countdown') {
+    if (ps.length === 0) g.brState = 'waiting';
+    else if (now >= g.timer) startBRMatch(g);
+  } else if (g.brState === 'playing') {
+    if (ps.length === 0) { resetBR(g); broadcastBRState(g); return; }   // sin jugadores → abortar
+    g.stormR = stormRadius(g, now);
+    const t = Math.min(1, Math.max(0, (now - g.stormStart) / BR_STORM_TIME));
+    const dps = 3 + 9 * t;                                // daño de tormenta sube con el tiempo
+    const hurt = (ent, type) => { if (ent.alive && Math.hypot(ent.x, ent.z) > g.stormR) applyDamage(g, type, ent, dps * dt, { id: 'storm', isPlayer: false, isStorm: true }); };
+    for (const p of ps) hurt(p, 'player');
+    for (const b of g.bots) hurt(b, 'bot');
+    updateBRBots(g, dt);
+    for (const pk of g.pickups) if (!pk.active && now >= pk.respawnAt) pk.active = true;
+    for (const mk of g.medkits) if (!mk.active && now >= mk.respawnAt) mk.active = true;
+    if (g.drops.length) g.drops = g.drops.filter(d => d.until > now);
+    if (brAlive(g) <= 1) endBRMatch(g);
+  } else if (g.brState === 'over') {
+    if (now >= g.timer) expelBRPlayers(g);
+  }
+  broadcastBRState(g);
+}
+function broadcastBRState(g) {
+  const now = Date.now();
+  const ps = playersIn(g);
+  const br = {
+    state: g.brState, alive: brAlive(g), total: g.brTotal || BR_TOTAL,
+    stormR: g.stormR || BR_SAFE_START, cx: 0, cz: 0, waiting: ps.length,
+    countdown: (g.brState === 'countdown' || g.brState === 'over') ? Math.max(0, g.timer - now) : 0,
+    winnerId: g.brWinnerId, winnerName: g.brWinnerName,
+  };
+  io.to('br').emit('state', {
+    players: ps.map(p => { const o = playerObj(p); o.brPlace = p.brPlace || 0; return o; }),
+    bots: g.bots.map(b => ({ id: b.id, x: b.x, y: b.y, z: b.z, ry: b.ry, health: b.health, maxHealth: BOT_HP, alive: b.alive, weapon: b.weapon, team: null })),
+    pickups: g.pickups.map(p => ({ id: p.id, x: p.x, z: p.z, weapon: p.weapon, active: p.active })),
+    medkits: g.medkits.map(m => ({ id: m.id, x: m.x, z: m.z, active: m.active })),
+    drops: g.drops.map(d => ({ id: d.id, x: d.x, z: d.z, weapon: d.weapon, until: d.until })),
+    leaderId: null, power: { active: false }, mode: 'br', teamScore: { A: 0, B: 0 }, br, timeLeft: 0, phase: 'playing',
+  });
+}
+
 let last = Date.now();
 setInterval(() => {
   const now = Date.now();
@@ -895,6 +1125,7 @@ setInterval(() => {
   updateGame(games.teams, dt);
   updateDuel(games.duel, dt);
   updateJugg(games.juggernaut, dt);
+  updateBR(games.br, dt);
 }, TICK_MS);
 
 function playerObj(p) {
@@ -919,12 +1150,12 @@ function broadcastState(g) {
 
 // Contadores de jugadores por modo (para el lobby)
 function modeCounts() {
-  let ffa = 0, teams = 0, duel = 0, juggernaut = 0;
+  let ffa = 0, teams = 0, duel = 0, juggernaut = 0, br = 0;
   for (const [, p] of players) {
     if (p.mode === 'teams') teams++; else if (p.mode === 'duel') duel++;
-    else if (p.mode === 'juggernaut') juggernaut++; else ffa++;
+    else if (p.mode === 'juggernaut') juggernaut++; else if (p.mode === 'br') br++; else ffa++;
   }
-  return { ffa, teams, duel, juggernaut };
+  return { ffa, teams, duel, juggernaut, br };
 }
 function sendCounts() { io.emit('counts', modeCounts()); }
 
@@ -935,11 +1166,13 @@ io.on('connection', (socket) => {
   socket.on('join', (data) => {
     const weapon = WEAPONS[data?.weapon]?.starter ? data.weapon : 'pistol';
     let mode = data?.mode;
-    if (mode !== 'teams' && mode !== 'duel' && mode !== 'juggernaut') mode = 'ffa';
+    if (mode !== 'teams' && mode !== 'duel' && mode !== 'juggernaut' && mode !== 'br') mode = 'ffa';
     // Duelo: capacidad máxima 2 — si ya están los dos, no se puede unir
     if (mode === 'duel' && playersIn(games.duel).length >= 2) { socket.emit('duelFull', {}); return; }
+    // Battle Royale: bloqueado si ya empezó (o está lleno) hasta la próxima partida
+    if (mode === 'br' && (games.br.brState === 'playing' || games.br.brState === 'over' || playersIn(games.br).length >= BR_TOTAL)) { socket.emit('brLocked', {}); return; }
     const g = games[mode];
-    socket.leave('ffa'); socket.leave('teams'); socket.leave('duel'); socket.leave('juggernaut'); socket.join(mode);
+    socket.leave('ffa'); socket.leave('teams'); socket.leave('duel'); socket.leave('juggernaut'); socket.leave('br'); socket.join(mode);
     const s = spawnPoint(g);
     const p = {
       id: socket.id, name: (String(data?.name || 'Jugador')).slice(0, 16) || 'Jugador', mode,
@@ -955,7 +1188,7 @@ io.on('connection', (socket) => {
     sendCounts();
     socket.emit('init', {
       selfId: socket.id,
-      map: { size: MAP_SIZE, obstacles: g.map.obstacles, eye: EYE, jumppads: g.map.jumppads, ammocrates: g.map.ammocrates, theme: g.map.theme },
+      map: { size: (g.map.half || 50) * 2, half: g.map.half || 50, obstacles: g.map.obstacles, eye: EYE, jumppads: g.map.jumppads, ammocrates: g.map.ammocrates, theme: g.map.theme },
       weapons: WEAPONS, spawn: { x: p.x, y: p.y, z: p.z }, weapon, mode,
       timeLeft: Math.max(0, g.matchEnd - Date.now()), phase: g.phase,
     });

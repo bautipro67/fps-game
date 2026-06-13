@@ -194,6 +194,26 @@ body.mobile #perf-hud { display: none; }
 #jugg-overlay h2.win { color: #46e08a; } #jugg-overlay h2.lose { color: #ff6a6a; }
 #jugg-overlay p { opacity: .8; margin-top: 12px; font-size: 15px; }
 
+/* HUD del Battle Royale (vivos + aviso de tormenta) */
+#br-hud { position: fixed; top: 54px; left: 50%; transform: translateX(-50%); z-index: 16; text-align: center; pointer-events: none; }
+#br-alive { font-family: 'Orbitron','Rajdhani',sans-serif; font-weight: 800; font-size: 19px; letter-spacing: 1px; color: #d6b3ff; background: rgba(10,12,20,.7); border: 1px solid rgba(176,107,255,.5); border-radius: 10px; padding: 4px 16px; display: inline-block; text-shadow: 0 2px 6px rgba(0,0,0,.6); }
+#br-warn { margin-top: 6px; font-size: 13px; font-weight: 800; letter-spacing: 1px; color: #ff7ad0; text-shadow: 0 1px 6px rgba(0,0,0,.8); animation: brWarn .8s ease-in-out infinite; }
+@keyframes brWarn { 50% { opacity: .4; } }
+
+/* Overlay del Battle Royale (espera / eliminado / victoria) */
+#br-overlay { position: fixed; inset: 0; z-index: 25; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+#br-overlay .br-card { pointer-events: auto; background: rgba(10,11,20,.85); border: 1px solid rgba(176,107,255,.45); border-radius: 16px; padding: 26px 42px; text-align: center; box-shadow: 0 16px 50px rgba(0,0,0,.6); backdrop-filter: blur(3px); }
+#br-overlay h2 { font-family: 'Orbitron','Rajdhani',sans-serif; font-size: 28px; letter-spacing: 1.5px; }
+#br-overlay h2.win { color: #ffd24d; } #br-overlay h2.lose { color: #ff6a6a; }
+#br-overlay p { opacity: .82; margin-top: 12px; font-size: 15px; }
+#br-lobby-btn { margin-top: 18px; padding: 10px 22px; border: 1px solid rgba(176,107,255,.6); border-radius: 9px; background: rgba(176,107,255,.18); color: #efe3ff; font-weight: 700; font-size: 15px; cursor: pointer; }
+#br-lobby-btn:hover { background: rgba(176,107,255,.32); }
+
+/* Tinte de pantalla cuando estás dentro de la tormenta */
+#storm-vignette { position: fixed; inset: 0; pointer-events: none; z-index: 14; opacity: 0; transition: opacity .3s; background: radial-gradient(ellipse at center, transparent 42%, rgba(150,80,255,.42) 100%); box-shadow: inset 0 0 120px rgba(150,80,255,.5); }
+body.instorm #storm-vignette { opacity: 1; animation: stormPulse 1.3s ease-in-out infinite; }
+@keyframes stormPulse { 50% { opacity: .55; } }
+
 /* Marcador por equipos (en partida) */
 #team-scores { position: fixed; top: 60px; left: 50%; transform: translateX(-50%); z-index: 16; display: flex; align-items: center; gap: 12px; }
 .team-box { font-family: 'Orbitron','Rajdhani',sans-serif; font-size: 22px; font-weight: 800; padding: 5px 16px; border-radius: 9px; background: rgba(10,16,24,.7); border: 2px solid transparent; }
@@ -401,6 +421,8 @@ body.mobile #prompt-pickup { top: 58%; font-size: 13px; }
   #duel-round { font-size: 11px; }
   #team-scores { top: 50px; gap: 8px; }
   .team-box { font-size: 17px; padding: 4px 11px; }
+  #br-hud { top: 44px; } #br-alive { font-size: 16px; padding: 3px 13px; }
+  #br-overlay .br-card { padding: 20px 22px; } #br-overlay h2 { font-size: 22px; }
   #notify { top: 112px; font-size: 12.5px; padding: 6px 14px; }
   #boost-indicator, #protect-indicator { top: 92px; font-size: 12px; padding: 5px 14px; }
 
