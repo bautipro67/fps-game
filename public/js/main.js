@@ -46,6 +46,9 @@ let firing = false;
 let viewModel = null;        // arma en primera persona
 let nearbyPickup = null;
 let aiming = false;          // apuntar con mira (ADS)
+const padMove = { x: 0, y: 0 };    // movimiento del joystick (stick izq.)
+let usingGamepad = false;          // hay un control conectado/en uso
+let padFire = false, padPrev = []; // estado anterior de gatillo/botones (detectar flanco)
 const baseFov = 78;
 let recoilKick = 0;
 let lastYaw = 0, lastPitch = 0, swayX = 0, swayY = 0;          // sway del arma al mirar
@@ -266,6 +269,7 @@ function initThree() {
   window.addEventListener('resize', onResize);
   setupInput();
   setupTouch();
+  setupGamepad();
   setupMenus();
 }
 
@@ -1336,11 +1340,13 @@ function updatePlayer(dt) {
     if (keys.d) _mv.add(_right);
     if (keys.a) _mv.sub(_right);
     if (touchMove.x || touchMove.y) { _mv.addScaledVector(_fwd, touchMove.y); _mv.addScaledVector(_right, touchMove.x); }
+    if (padMove.x || padMove.y) { _mv.addScaledVector(_fwd, padMove.y); _mv.addScaledVector(_right, padMove.x); }
   }
   isMoving = _mv.lengthSq() > 0.0001;
-  const touchMag = Math.hypot(touchMove.x, touchMove.y);
+  const analogMag = Math.max(Math.hypot(touchMove.x, touchMove.y), Math.hypot(padMove.x, padMove.y));
+  const analogFwd = Math.max(touchMove.y, padMove.y);
   const crouching = keys.crouch && local.onGround && inputOn;
-  const sprintIntent = inputOn && isMoving && !aiming && ((keys.shift && keys.w) || (touchMag > 0.92 && touchMove.y > 0.4));
+  const sprintIntent = inputOn && isMoving && !aiming && ((keys.shift && keys.w) || (analogMag > 0.9 && analogFwd > 0.4));
   sprintActive = sprintIntent && !crouching;
 
   // --- barrida / slide: venías corriendo y te agachás → deslizada con impulso ---
@@ -1790,7 +1796,7 @@ function setupMenus() {
   const range = D('sens-range'), val = D('sens-val');
   range.value = sensitivity; val.textContent = sensitivity.toFixed(1);
   range.addEventListener('input', () => { setSensitivity(parseFloat(range.value)); val.textContent = sensitivity.toFixed(1); });
-  D('im-resume').onclick = () => { if (isMobile) menuOpen = false; else controls.lock(); };
+  D('im-resume').onclick = () => { if (isMobile || usingGamepad) menuOpen = false; else controls.lock(); };
   D('im-lobby').onclick = () => returnToLobby();
   const bm = D('btn-menu');
   bm.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
@@ -1864,6 +1870,52 @@ function setupTouch() {
   }
   press('btn-reload', () => startReload());
   press('btn-pickup', () => { if (nearbyPickup) socket.emit('pickup', nearbyPickup.id); });
+}
+
+// ============================================================================
+//  Soporte de CONTROL / JOYSTICK (Gamepad API) — para consola y PC con mando
+//  Mapeo estándar (Xbox / PlayStation):
+//   Stick izq = moverse · Stick der = mirar · R2/RT = disparar · L2/LT = apuntar
+//   ✕/A = saltar · ○/B = agacharse · ▢/X = recargar · △/Y = recoger · Options = menú
+// ============================================================================
+function setupGamepad() {
+  window.addEventListener('gamepadconnected', () => { usingGamepad = true; document.body.classList.add('gamepad'); if (joined) showToast('🎮 Control conectado'); });
+  window.addEventListener('gamepaddisconnected', () => {
+    const pads = navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : [];
+    if (!pads.length) { usingGamepad = false; document.body.classList.remove('gamepad'); padMove.x = padMove.y = 0; firing = false; padFire = false; }
+  });
+}
+function pollGamepad(dt) {
+  if (!navigator.getGamepads) return;
+  let gp = null;
+  for (const p of navigator.getGamepads()) { if (p && p.connected) { gp = p; break; } }
+  if (!gp) { padMove.x = 0; padMove.y = 0; return; }
+  usingGamepad = true;
+
+  const dz = (v) => (Math.abs(v) < 0.18 ? 0 : (v - Math.sign(v) * 0.18) / 0.82); // zona muerta + reescala
+  const curve = (v) => Math.sign(v) * v * v;                                      // respuesta fina al centro
+  const btn = (i) => !!(gp.buttons[i] && gp.buttons[i].pressed);
+
+  if (inputOn) {
+    padMove.x = dz(gp.axes[0] || 0);
+    padMove.y = -dz(gp.axes[1] || 0);                       // adelante = stick hacia arriba
+    const rx = dz(gp.axes[2] || 0), ry = dz(gp.axes[3] || 0); // stick derecho → mirar
+    if (rx || ry) { const LOOK = 1550, mul = aiming ? 0.45 : 1; applyLook(curve(rx) * LOOK * mul * dt, curve(ry) * LOOK * mul * dt); }
+
+    const fireHeld = btn(7) || btn(5);                       // R2 o RB → disparar
+    if (fireHeld && !padFire) { firing = true; tryShoot(); } // (semiauto: un tiro por gatillazo)
+    else if (!fireHeld && padFire) firing = false;
+    padFire = fireHeld;
+
+    aiming = btn(6) || btn(4);                               // L2 o LB → apuntar
+    keys.space = btn(0);                                     // ✕/A → saltar (mantener)
+    if (btn(1) && !padPrev[1]) { keys.crouch = !keys.crouch; const cb = D('btn-crouch'); if (cb) cb.classList.toggle('pressed', keys.crouch); } // ○/B
+    if (btn(2) && !padPrev[2]) startReload();                // ▢/X → recargar
+    if (btn(3) && !padPrev[3] && nearbyPickup) socket.emit('pickup', nearbyPickup.id); // △/Y → recoger
+  } else { padMove.x = 0; padMove.y = 0; if (padFire) { firing = false; padFire = false; } }
+
+  if (btn(9) && !padPrev[9]) menuOpen = !menuOpen;           // Options/Start → menú/pausa
+  padPrev = gp.buttons.map(b => b.pressed);
 }
 function hideDeath() {
   D('death-screen').classList.add('hidden');
@@ -1951,9 +2003,12 @@ function setupInput() {
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(0.05, clock.getDelta());
+  // detectar control conectado antes de calcular inputOn (habilita jugar sin mouse)
+  if (!usingGamepad && navigator.getGamepads) { for (const p of navigator.getGamepads()) if (p && p.connected) { usingGamepad = true; document.body.classList.add('gamepad'); break; } }
   const duelFrozen = latest.mode === 'duel' && latest.duel && latest.duel.state !== 'playing';
   const juggFrozen = latest.mode === 'juggernaut' && latest.jugg && latest.jugg.state !== 'fighting';
-  inputOn = joined && selfAlive && !duelFrozen && !juggFrozen && (pointerLocked || (isMobile && !menuOpen));
+  inputOn = joined && selfAlive && !duelFrozen && !juggFrozen && (pointerLocked || ((isMobile || usingGamepad) && !menuOpen));
+  pollGamepad(dt);                                                            // leer el control (usa el inputOn recién calculado)
 
   // métricas de rendimiento (FPS/ping) y marcador en vivo
   frames++; perfAcc += dt;
