@@ -228,14 +228,30 @@ function pointClear(obst, x, z, r) {
   }
   return true;
 }
+// Rumbo para esquivar: si el camino recto está libre, va recto; si no, rodea el
+// obstáculo SIEMPRE por el mismo lado (seguimiento de pared) en vez de zigzaguear.
 function avoidDir(map, b, dx, dz) {
-  const probe = 3.5, base = Math.atan2(dx, dz);
-  for (const off of [0, 0.5, -0.5, 1.0, -1.0, 1.6, -1.6]) {
-    const a = base + off, ndx = Math.sin(a), ndz = Math.cos(a);
-    const tx = b.x + ndx * probe, tz = b.z + ndz * probe;
-    if (pointClear(map.obstacles, tx, tz, 1.0) && !segBlocked(map.aabbs, b.x, b.z, tx, tz)) return { x: ndx, z: ndz };
+  const base = Math.atan2(dx, dz), probe = 4.0, clr = 0.9;
+  const ok = (ang) => {
+    const tx = b.x + Math.sin(ang) * probe, tz = b.z + Math.cos(ang) * probe;
+    return pointClear(map.obstacles, tx, tz, clr) && !segBlocked(map.aabbs, b.x, b.z, tx, tz);
+  };
+  if (ok(base)) { b.avoidSide = 0; return { x: Math.sin(base), z: Math.cos(base) }; } // recto libre
+  if (!b.avoidSide) b.avoidSide = Math.random() < 0.5 ? 1 : -1;                        // fijar un lado
+  for (const m of [0.5, 0.9, 1.3, 1.7, 2.2, 2.8]) {                                    // rodear por ese lado
+    const a = base + m * b.avoidSide; if (ok(a)) return { x: Math.sin(a), z: Math.cos(a) };
   }
-  return { x: dx, z: dz };
+  for (const m of [0.5, 0.9, 1.3, 1.7, 2.2, 2.8]) {                                    // si no, por el otro
+    const a = base - m * b.avoidSide; if (ok(a)) { b.avoidSide = -b.avoidSide; return { x: Math.sin(a), z: Math.cos(a) }; }
+  }
+  const a = base + 1.6 * b.avoidSide; return { x: Math.sin(a), z: Math.cos(a) };       // sin salida: girar
+}
+// Gira el ángulo `cur` hacia `want` como mucho `maxStep` radianes (giro gradual).
+function turnToward(cur, want, maxStep) {
+  let d = want - cur;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return cur + clamp(d, -maxStep, maxStep);
 }
 function randomWander(map) {
   for (let i = 0; i < 10; i++) {
@@ -262,7 +278,7 @@ function spawnBot(g) {
   return {
     id: 'bot' + (botSeq++), name: 'BOT', x: s.x, y: 0, z: s.z, ry: Math.random() * Math.PI * 2,
     health: BOT_HP, alive: true, target: null, wander: randomWander(g.map), weapon: randomBotWeapon(),
-    lastShot: 0, respawnAt: 0, lastHurtBy: null, stuck: 0, detourUntil: 0, detourDir: { x: 0, z: 0 },
+    lastShot: 0, respawnAt: 0, lastHurtBy: null, stuck: 0, avoidSide: 0, wanderUntil: 0, lastSeen: 0,
     strafe: 1, strafeFlip: 0, team: null,
   };
 }
@@ -435,65 +451,66 @@ function updateBots(g, dt) {
       if (now >= b.respawnAt) {
         const s = spawnPoint(g, b.team);
         b.x = s.x; b.z = s.z; b.y = 0; b.health = BOT_HP; b.alive = true;
-        b.target = null; b.lastHurtBy = null; b.stuck = 0; b.detourUntil = 0; b.wander = randomWander(g.map);
+        b.target = null; b.lastHurtBy = null; b.stuck = 0; b.avoidSide = 0; b.wanderUntil = 0; b.lastSeen = 0; b.wander = randomWander(g.map);
         b.weapon = randomBotWeapon();
       }
       continue;
     }
-    let target = null, bd = BOT_VISION;
+    // buscar el mejor enemigo VISIBLE (con línea de visión despejada)
+    let vis = null, bd = BOT_VISION;
     const consider = (ent, type) => {
       if (!ent.alive) return;
       if (sameTeam(g, b.team, ent.team)) return;
       const dx = ent.x - b.x, dz = ent.z - b.z, dist = Math.hypot(dx, dz);
-      if (dist < bd && !segBlocked(g.map.aabbs, b.x, b.z, ent.x, ent.z)) { bd = dist; target = { ent, type, dist, dx, dz }; }
+      if (dist < bd && !segBlocked(g.map.aabbs, b.x, b.z, ent.x, ent.z)) { bd = dist; vis = { ent, type, dist, dx, dz }; }
     };
     for (const p of ps) consider(p, 'player');
     for (const other of g.bots) if (other !== b) consider(other, 'bot');
+    if (vis) { b.lastSeen = now; b.seenX = vis.ent.x; b.seenZ = vis.ent.z; } // recordar la última posición vista
 
     const bw = BOT_WEAPONS[b.weapon] || BOT_WEAPONS.rifle;
-    let mvx = 0, mvz = 0, wantMove = false;
-    if (target) {
+    let mvx = 0, mvz = 0, wantMove = false, facing = null;
+    if (vis) {
       const reach = Math.min(bw.range, BOT_VISION);
-      const ideal = reach * 0.7, near = reach * 0.4, inv = 1 / (target.dist || 1);
-      if (target.dist > ideal) { mvx = target.dx * inv; mvz = target.dz * inv; wantMove = true; }
-      else if (target.dist < near) { mvx = -target.dx * inv; mvz = -target.dz * inv; wantMove = true; }
+      const ideal = reach * 0.7, near = reach * 0.4, inv = 1 / (vis.dist || 1);
+      if (vis.dist > ideal) { mvx = vis.dx * inv; mvz = vis.dz * inv; wantMove = true; }
+      else if (vis.dist < near) { mvx = -vis.dx * inv; mvz = -vis.dz * inv; wantMove = true; }
       else {
         if (now > (b.strafeFlip || 0)) { b.strafe = Math.random() < 0.5 ? 1 : -1; b.strafeFlip = now + 1200 + Math.random() * 1600; }
-        mvx = -target.dz * inv * b.strafe; mvz = target.dx * inv * b.strafe; wantMove = true;
+        mvx = -vis.dz * inv * b.strafe; mvz = vis.dx * inv * b.strafe; wantMove = true;
       }
-      if (target.dist < bw.range && now - b.lastShot > bw.fireMs) {
+      facing = Math.atan2(vis.dx, vis.dz);                              // mira al enemigo (apuntar)
+      if (vis.dist < bw.range && now - b.lastShot > bw.fireMs) {
         b.lastShot = now;
-        const hitChance = Math.max(0.16, 1 - target.dist / bw.range) * 0.72;
-        if (Math.random() < hitChance) applyDamage(g, target.type, target.ent, bw.damage, { id: b.id, isPlayer: false });
-        io.to(g.mode).emit('tracer', { x: b.x, y: 1.4, z: b.z, tx: target.ent.x, ty: target.ent.y + 1.2, tz: target.ent.z, weapon: b.weapon });
+        const hitChance = Math.max(0.16, 1 - vis.dist / bw.range) * 0.72;
+        if (Math.random() < hitChance) applyDamage(g, vis.type, vis.ent, bw.damage, { id: b.id, isPlayer: false });
+        io.to(g.mode).emit('tracer', { x: b.x, y: 1.4, z: b.z, tx: vis.ent.x, ty: vis.ent.y + 1.2, tz: vis.ent.z, weapon: b.weapon });
       }
+    } else if (b.lastSeen && now - b.lastSeen < 1600) {
+      // perdió el tiro un instante (cobertura): va a la última posición conocida en vez de re-vagabundear (evita el giro)
+      const dx = b.seenX - b.x, dz = b.seenZ - b.z, dist = Math.hypot(dx, dz);
+      if (dist > 1.5) { mvx = dx / dist; mvz = dz / dist; wantMove = true; }
     } else {
       const dx = b.wander.x - b.x, dz = b.wander.z - b.z, dist = Math.hypot(dx, dz);
-      if (dist < 2) b.wander = randomWander(g.map);
+      // nuevo destino al llegar, o si lleva demasiado sin alcanzarlo (evita orbitar)
+      if (dist < 2 || now > (b.wanderUntil || 0)) { b.wander = randomWander(g.map); b.wanderUntil = now + 5000; }
       else { mvx = dx / dist; mvz = dz / dist; wantMove = true; }
     }
 
     if (wantMove) {
-      let hx, hz;
-      if (now < b.detourUntil) { hx = b.detourDir.x; hz = b.detourDir.z; }
-      else { const a = avoidDir(g.map, b, mvx, mvz); hx = a.x; hz = a.z; }
+      const a = avoidDir(g.map, b, mvx, mvz);                 // rodea sin zigzag (mantiene el lado)
       const sp = BOT_SPEED * dt;
-      const res = resolve(g.map.obstacles, b.x + hx * sp, b.z + hz * sp, 0.6);
+      const res = resolve(g.map.obstacles, b.x + a.x * sp, b.z + a.z * sp, 0.6);
       const nx = clamp(res.x, -49, 49), nz = clamp(res.z, -49, 49);
       const moved = Math.hypot(nx - b.x, nz - b.z);
       b.x = nx; b.z = nz;
-      if (!target) b.ry = Math.atan2(hx, hz);
-      if (moved < sp * 0.35) {
-        b.stuck += dt;
-        if (b.stuck > 0.35 && now >= b.detourUntil) {
-          const side = Math.random() < 0.5 ? 1 : -1;
-          b.detourDir = { x: hz * side, z: -hx * side };
-          b.detourUntil = now + 600; b.stuck = 0;
-          if (!target) b.wander = randomWander(g.map);
-        }
+      if (facing !== null) b.ry = facing;                              // en combate: mira al enemigo
+      else b.ry = turnToward(b.ry, Math.atan2(a.x, a.z), 7 * dt);      // si no, gira suave hacia el rumbo
+      if (moved < sp * 0.3) {                                          // realmente atascado: replantear
+        b.stuck = (b.stuck || 0) + dt;
+        if (b.stuck > 1.0) { b.stuck = 0; b.avoidSide = b.avoidSide ? -b.avoidSide : 1; b.wander = randomWander(g.map); b.wanderUntil = now + 5000; }
       } else b.stuck = 0;
-    }
-    if (target) b.ry = Math.atan2(target.dx, target.dz);
+    } else if (facing !== null) b.ry = facing;
   }
 }
 
