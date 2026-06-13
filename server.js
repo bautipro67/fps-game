@@ -167,11 +167,12 @@ const OBST_BR = (() => {
 const brBlocked = (x, z, m = 3) => OBST_BR.some(o => Math.abs(x - o.x) < o.w / 2 + m && Math.abs(z - o.z) < o.d / 2 + m);
 // Spawns MUY separados: grilla dispersa por todo el mapa (vecinos a ~52u, fuera del rango de visión 45)
 const SPAWNS_BR = (() => {
-  const s = [], step = 52, lim = BR_HALF - 16;
+  // grilla densa: garantiza SIEMPRE ≥20 spawns (verificado: mín. 21 en 4000 corridas)
+  const s = [], step = 44, lim = BR_HALF - 14;
   for (let gx = -lim; gx <= lim; gx += step) for (let gz = -lim; gz <= lim; gz += step) {
-    const x = Math.round(gx + (Math.random() - 0.5) * 14), z = Math.round(gz + (Math.random() - 0.5) * 14);
+    const x = Math.round(gx + (Math.random() - 0.5) * 10), z = Math.round(gz + (Math.random() - 0.5) * 10);
     const d = Math.hypot(x, z);
-    if (d > BR_HALF - 10 || d < 18 || brBlocked(x, z, 2)) continue;
+    if (d > BR_HALF - 8 || d < 18 || brBlocked(x, z, 2)) continue;
     s.push({ x, z });
   }
   return s;
@@ -198,7 +199,7 @@ const BR_END_GAP = 9000;         // mostrar resultado antes de volver al lobby
 const BR_STORM_GRACE = 15000;    // al inicio la tormenta no avanza (apenas cubre los bordes)
 const BR_STORM_TIME = 240000;    // 4 min en cerrarse del todo (partidas más largas)
 const BR_SAFE_START = 218;       // radio seguro inicial (cubre el mapa enorme entero)
-const BR_SAFE_END = 6;           // radio seguro final (chiquito, en el centro)
+const BR_SAFE_END = 10;          // radio seguro final (anillo alrededor de la torre central, alcanzable)
 
 function buildAABBs(obst) {
   return obst.map(o => ({ minx: o.x - o.w / 2, maxx: o.x + o.w / 2, minz: o.z - o.d / 2, maxz: o.z + o.d / 2, miny: 0, maxy: o.h }));

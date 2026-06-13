@@ -335,13 +335,26 @@ function makeFloorTexture() {
   const cv = document.createElement('canvas'); cv.width = cv.height = 256;
   const x = cv.getContext('2d');
   x.fillStyle = '#2b3440'; x.fillRect(0, 0, 256, 256);
-  x.strokeStyle = '#3a4a5b'; x.lineWidth = 4;
+  // paneles principales (rejilla de 64)
+  x.strokeStyle = '#3d4d5e'; x.lineWidth = 4;
   for (let i = 0; i <= 256; i += 64) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 256); x.moveTo(0, i); x.lineTo(256, i); x.stroke(); }
-  x.fillStyle = '#26415a'; x.fillRect(0, 0, 64, 64); x.fillRect(128, 128, 64, 64);
-  x.fillStyle = 'rgba(255,255,255,0.03)';
-  for (let i = 0; i < 70; i++) x.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
+  // costuras finas internas
+  x.strokeStyle = 'rgba(150,175,200,0.09)'; x.lineWidth = 1;
+  for (let i = 32; i <= 256; i += 64) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 256); x.moveTo(0, i); x.lineTo(256, i); x.stroke(); }
+  // tornillos en cada intersección de panel
+  x.fillStyle = '#1b232e';
+  for (let gx = 0; gx <= 256; gx += 64) for (let gy = 0; gy <= 256; gy += 64) { x.beginPath(); x.arc(gx, gy, 3, 0, 7); x.fill(); }
+  // paneles diferenciados + uno con tinte frío
+  x.fillStyle = '#313d4a'; x.fillRect(2, 2, 60, 60); x.fillRect(130, 130, 60, 60);
+  x.fillStyle = 'rgba(90,150,200,0.07)'; x.fillRect(66, 130, 60, 60);
+  // chapa con rayas diagonales (zona de peligro)
+  x.strokeStyle = 'rgba(248,197,55,0.10)'; x.lineWidth = 6;
+  for (let d = -60; d < 60; d += 14) { x.beginPath(); x.moveTo(130 + d, 66); x.lineTo(190 + d, 6); x.stroke(); }
+  // grano sutil
+  x.fillStyle = 'rgba(255,255,255,0.028)';
+  for (let i = 0; i < 90; i++) x.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
   const t = new THREE.CanvasTexture(cv);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(12, 12);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(14, 14); t.anisotropy = 4;
   return t;
 }
 function makeCrateTexture() {
@@ -521,12 +534,13 @@ const spinners = [];
 function weaponMats(key) {
   const accent = weapons[key]?.color ?? 0xf1c40f;
   return {
-    metal: new THREE.MeshStandardMaterial({ color: 0x23272e, metalness: .6, roughness: .4 }),
-    dark: new THREE.MeshStandardMaterial({ color: 0x14171c, metalness: .5, roughness: .5 }),
-    accent: new THREE.MeshStandardMaterial({ color: accent, metalness: .4, roughness: .35, emissive: accent, emissiveIntensity: .3 }),
+    metal: new THREE.MeshStandardMaterial({ color: 0x2e333b, metalness: .62, roughness: .36 }),
+    dark: new THREE.MeshStandardMaterial({ color: 0x141318, metalness: .5, roughness: .5 }),
+    grip: new THREE.MeshStandardMaterial({ color: 0x1c1a20, metalness: .15, roughness: .85 }), // empuñaduras mate
+    accent: new THREE.MeshStandardMaterial({ color: accent, metalness: .4, roughness: .3, emissive: accent, emissiveIntensity: .5 }),
   };
 }
-function makeWeaponModel(key) {
+function makeWeaponModel(key, detail = true) {
   const g = new THREE.Group();
   const m = weaponMats(key);
   const box = (w, h, d, mat, x, y, z, rx) => {
@@ -539,45 +553,54 @@ function makeWeaponModel(key) {
     if (axis === 'z') e.rotation.x = Math.PI / 2; if (axis === 'x') e.rotation.z = Math.PI / 2;
     e.castShadow = true; g.add(e); return e;
   };
+  const sight = (z, h2 = 0.06) => detail && box(0.02, h2, 0.03, m.dark, 0, 0.10 + h2 / 2, z); // poste de mira (omitido en móvil)
   switch (key) {
     case 'pistol':
       box(0.13, 0.17, 0.42, m.metal, 0, 0, -0.12);
-      box(0.10, 0.10, 0.18, m.dark, 0, 0.02, -0.34);
-      box(0.11, 0.22, 0.14, m.dark, 0, -0.17, 0.02, 0.25);
+      box(0.10, 0.10, 0.18, m.dark, 0, 0.02, -0.34);       // corredera
+      box(0.11, 0.22, 0.14, m.grip, 0, -0.17, 0.02, 0.25); // empuñadura
       box(0.06, 0.05, 0.16, m.accent, 0, 0.10, -0.10);
+      sight(-0.30, 0.045); sight(0.0, 0.045);              // miras
       break;
     case 'rifle':
       box(0.12, 0.16, 0.85, m.metal, 0, 0, -0.30);
       cyl(0.03, 0.5, m.dark, 0, 0.02, -0.78, 'z');
-      box(0.09, 0.28, 0.13, m.dark, 0, -0.20, -0.12, 0.12);
-      box(0.10, 0.13, 0.26, m.dark, 0, -0.02, 0.18);
-      box(0.05, 0.06, 0.5, m.accent, 0, 0.10, -0.30);
-      box(0.04, 0.07, 0.04, m.dark, 0, 0.15, -0.50);
+      cyl(0.05, 0.09, m.dark, 0, 0.02, -1.0, 'z');         // bocacha
+      box(0.09, 0.28, 0.13, m.grip, 0, -0.20, -0.12, 0.12);// empuñadura
+      box(0.10, 0.13, 0.26, m.grip, 0, -0.02, 0.18);       // culata
+      box(0.05, 0.06, 0.5, m.accent, 0, 0.10, -0.30);      // riel superior
+      box(0.09, 0.24, 0.12, m.grip, 0, -0.18, -0.5);       // cargador curvo
+      sight(-0.66); sight(0.04);                            // miras delantera/trasera
       break;
     case 'shotgun':
       cyl(0.045, 0.8, m.dark, 0.055, 0.02, -0.55, 'z');
       cyl(0.045, 0.8, m.dark, -0.055, 0.02, -0.55, 'z');
       box(0.17, 0.16, 0.5, m.metal, 0, -0.02, -0.2);
-      box(0.15, 0.10, 0.22, m.accent, 0, -0.05, -0.34);
-      box(0.11, 0.22, 0.15, m.dark, 0, -0.18, 0.04, 0.22);
-      box(0.10, 0.13, 0.28, m.dark, 0, -0.02, 0.2);
+      box(0.15, 0.10, 0.22, m.accent, 0, -0.05, -0.34);    // guardamanos
+      box(0.11, 0.22, 0.15, m.grip, 0, -0.18, 0.04, 0.22); // empuñadura
+      box(0.10, 0.13, 0.28, m.grip, 0, -0.02, 0.2);        // culata
+      box(0.035, 0.05, 0.03, m.accent, 0, 0.085, -0.92);   // punto de mira
       break;
     case 'smg':
       box(0.12, 0.17, 0.5, m.metal, 0, 0, -0.18);
       cyl(0.028, 0.26, m.dark, 0, 0.02, -0.5, 'z');
-      box(0.08, 0.30, 0.10, m.accent, 0, -0.22, -0.02, 0.12);
-      box(0.11, 0.20, 0.13, m.dark, 0, -0.16, 0.10, 0.25);
+      box(0.08, 0.30, 0.10, m.grip, 0, -0.22, -0.02, 0.12);// cargador
+      box(0.11, 0.20, 0.13, m.grip, 0, -0.16, 0.10, 0.25); // empuñadura
       box(0.06, 0.10, 0.22, m.dark, 0, 0.0, 0.16);
+      box(0.05, 0.05, 0.34, m.accent, 0, 0.10, -0.18);     // riel
+      sight(-0.42); sight(0.06);
       break;
     case 'sniper':
       box(0.11, 0.15, 1.0, m.metal, 0, 0, -0.32);
       cyl(0.028, 0.85, m.dark, 0, 0.0, -0.95, 'z');
-      cyl(0.06, 0.42, m.accent, 0, 0.16, -0.32, 'z');
+      cyl(0.05, 0.07, m.dark, 0, 0.0, -1.2, 'z');          // bocacha
+      cyl(0.06, 0.42, m.accent, 0, 0.16, -0.32, 'z');      // mira telescópica
       cyl(0.07, 0.05, m.dark, 0, 0.16, -0.12, 'z');
       cyl(0.07, 0.05, m.dark, 0, 0.16, -0.52, 'z');
       box(0.04, 0.10, 0.04, m.dark, 0, 0.09, -0.30);
-      box(0.10, 0.14, 0.30, m.dark, 0, -0.02, 0.22);
-      box(0.11, 0.22, 0.14, m.dark, 0, -0.17, 0.06, 0.22);
+      box(0.10, 0.14, 0.30, m.grip, 0, -0.02, 0.22);       // culata
+      box(0.11, 0.22, 0.14, m.grip, 0, -0.17, 0.06, 0.22); // empuñadura
+      box(0.07, 0.10, 0.5, m.grip, 0, -0.12, -0.55);       // bípode/guardamanos
       break;
     default:
       box(0.13, 0.16, 0.6, m.metal, 0, 0, -0.2);
@@ -585,9 +608,24 @@ function makeWeaponModel(key) {
   return g;
 }
 
+// Manos enguantadas que sostienen el arma en 1ª persona (hijas del arma: la siguen al apuntar/balancear)
+function addViewHands(g, key) {
+  const glove = new THREE.MeshStandardMaterial({ color: 0x2b3038, roughness: .72, metalness: .12 });
+  const hand = (x, y, z, rx, ry, rz) => {
+    const arm = new THREE.Group(); arm.position.set(x, y, z); arm.rotation.set(rx, ry, rz);
+    const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.062, 0.3, 4, 8), glove);
+    fore.position.y = -0.17; arm.add(fore);
+    arm.add(new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.11, 0.15), glove)); // puño
+    g.add(arm); return arm;
+  };
+  const fore = key === 'sniper' || key === 'rifle' ? -0.5 : key === 'shotgun' ? -0.42 : key === 'smg' ? -0.34 : -0.16;
+  hand(0.02, -0.15, 0.06, -0.8, 0.25, 0.15);   // derecha: empuñadura/gatillo
+  hand(-0.03, -0.09, fore, -1.0, -0.2, -0.2);  // izquierda: guardamanos
+}
 function buildViewModel() {
   if (viewModel) camera.remove(viewModel);
   const g = makeWeaponModel(local.weapon);
+  addViewHands(g, local.weapon);
   const hip = new THREE.Vector3(0.3, -0.28, -0.55);
   const ads = (local.weapon === 'sniper')
     ? new THREE.Vector3(0.0, -0.085, -0.34)
@@ -668,10 +706,11 @@ function limb(parent, px, py, pz, mesh, hang) {
 }
 function makePlayerMesh(color) {
   const g = new THREE.Group();
+  const HD = !isMobile;                            // detalle extra solo en PC (móvil: modelo liviano)
   const suit = new THREE.MeshStandardMaterial({ color, roughness: .55, metalness: .15 });
   const dark = new THREE.MeshStandardMaterial({ color: 0x1b2330, roughness: .6 });
   const skin = new THREE.MeshStandardMaterial({ color: 0xe0a98a, roughness: .7 });
-  const visorMat = new THREE.MeshStandardMaterial({ color: 0x10141a, roughness: .3, metalness: .6, emissive: 0x2a5a88, emissiveIntensity: .5 });
+  const visorMat = new THREE.MeshStandardMaterial({ color: 0x0c1016, roughness: .25, metalness: .6, emissive: 0x37a6ff, emissiveIntensity: .95 });
 
   const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.36, 0.6, 4, 12), suit);
   torso.position.y = 1.28; torso.castShadow = true; g.add(torso);
@@ -690,12 +729,20 @@ function makePlayerMesh(color) {
   const armR = limb(g, -0.42, 1.52, 0, new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.5, 4, 8), suit), -0.35);
   const legL = limb(g, 0.16, 0.92, 0, new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.55, 4, 8), dark), -0.42);
   const legR = limb(g, -0.16, 0.92, 0, new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.55, 4, 8), dark), -0.42);
+  if (HD) {                                        // guantes, botas, hombreras, cinturón y emblema (PC)
+    for (const arm of [armL, armR]) { const hnd = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.14, 0.18), dark); hnd.position.y = -0.62; arm.add(hnd); }
+    for (const leg of [legL, legR]) { const bt = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.13, 0.3), dark); bt.position.set(0, -0.72, -0.05); leg.add(bt); }
+    for (const sx of [-1, 1]) { const sp = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.32), suit); sp.position.set(sx * 0.42, 1.6, 0); sp.rotation.z = sx * 0.22; sp.castShadow = true; g.add(sp); }
+    const belt = new THREE.Mesh(new THREE.BoxGeometry(0.74, 0.1, 0.5), dark); belt.position.y = 1.02; g.add(belt);
+    const emblem = new THREE.Mesh(new THREE.CircleGeometry(0.075, 16), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: .8 })); emblem.position.set(0, 1.4, -0.37); g.add(emblem);
+  }
   g.userData.walk = { armL, armR, legL, legR };
   g.userData.bodyMat = suit; // para flash de impacto
   return g;
 }
 function makeBotMesh() {
   const g = new THREE.Group();
+  const HD = !isMobile;                            // detalle extra solo en PC
   const metal = new THREE.MeshStandardMaterial({ color: 0x3a3f47, metalness: .75, roughness: .35 });
   const dark = new THREE.MeshStandardMaterial({ color: 0x16191e, metalness: .6, roughness: .5 });
   const glow = new THREE.MeshStandardMaterial({ color: 0xff3b30, emissive: 0xff2a20, emissiveIntensity: 1.1, roughness: .4 });
@@ -720,6 +767,14 @@ function makeBotMesh() {
   const armR = limb(g, -0.45, 1.45, 0, new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.6, 10), dark), -0.32);
   const legL = limb(g, 0.16, 0.82, 0, new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.62, 0.24), dark), -0.33);
   const legR = limb(g, -0.16, 0.82, 0, new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.62, 0.24), dark), -0.33);
+  if (HD) {                                        // manos, articulaciones que brillan, pies y luz de pecho (PC)
+    for (const arm of [armL, armR]) {
+      const hnd = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.16), metal); hnd.position.y = -0.58; arm.add(hnd);
+      const j = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 8), glow); j.position.y = -0.3; arm.add(j);
+    }
+    for (const leg of [legL, legR]) { const ft = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.12, 0.34), metal); ft.position.set(0, -0.62, -0.05); leg.add(ft); }
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.06, 0.04), glow); bar.position.set(0, 1.16, -0.235); g.add(bar);
+  }
   g.userData.walk = { armL, armR, legL, legR };
   g.userData.bodyMat = metal; g.userData.glow = glow; // para flash de impacto y tinte por arma
   return g;
@@ -734,7 +789,7 @@ function setHeldWeapon(e, weaponKey) {
   }
   e.weapon = weaponKey;
   if (!weaponKey || !weapons[weaponKey]) return;
-  const wm = makeWeaponModel(weaponKey);
+  const wm = makeWeaponModel(weaponKey, !isMobile); // menos detalle en las armas en mano (móvil)
   wm.scale.setScalar(1.4); // bien visible para distinguir el arma de cada bot
   wm.position.set(0.26, 1.28, -0.42); // mano derecha, al frente, a la altura del pecho
   wm.traverse((o) => { o.castShadow = false; });
@@ -909,8 +964,11 @@ function interpEntities(dt) {
         const s = Math.sin(e.walkPhase) * Math.min(0.7, 0.12 + sp * 0.05);
         w.legL.rotation.x = s; w.legR.rotation.x = -s;
         w.armL.rotation.x = -s; w.armR.rotation.x = s;
+        e.avatar.position.y = Math.abs(Math.sin(e.walkPhase)) * Math.min(0.07, 0.02 + sp * 0.006); // rebote
+        e.avatar.rotation.x = -Math.min(0.13, sp * 0.013);                                          // inclinación al correr
       } else {
         for (const part of [w.legL, w.legR, w.armL, w.armR]) part.rotation.x *= 0.8;
+        e.avatar.position.y *= 0.85; e.avatar.rotation.x *= 0.85;
       }
     }
     // pasos audibles de los demás (conciencia espacial)
