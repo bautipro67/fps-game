@@ -122,6 +122,31 @@ const OBST_DUEL = [
 const DUEL_SPAWN_A = { x: 0, z: 40 };
 const DUEL_SPAWN_B = { x: 0, z: -40 };
 
+// --- Mapa 4: COLISEO (Juggernaut) — arena abierta con pilares para cubrirse ---
+const OBST_JUGG = [
+  { x: 16, z: 0, w: 4, d: 4, h: 6 }, { x: -16, z: 0, w: 4, d: 4, h: 6 },     // pilares internos
+  { x: 0, z: 16, w: 4, d: 4, h: 6 }, { x: 0, z: -16, w: 4, d: 4, h: 6 },
+  { x: 22, z: 22, w: 4, d: 4, h: 5 }, { x: -22, z: 22, w: 4, d: 4, h: 5 },
+  { x: 22, z: -22, w: 4, d: 4, h: 5 }, { x: -22, z: -22, w: 4, d: 4, h: 5 },
+  { x: 34, z: 0, w: 3, d: 3, h: 3 }, { x: -34, z: 0, w: 3, d: 3, h: 3 },     // anillo exterior bajo
+  { x: 0, z: 34, w: 3, d: 3, h: 3 }, { x: 0, z: -34, w: 3, d: 3, h: 3 },
+  { x: 30, z: 18, w: 3, d: 3, h: 3 }, { x: -30, z: 18, w: 3, d: 3, h: 3 },
+  { x: 30, z: -18, w: 3, d: 3, h: 3 }, { x: -30, z: -18, w: 3, d: 3, h: 3 },
+];
+const SPAWNS_JUGG = [
+  { x: 40, z: 40 }, { x: -40, z: 40 }, { x: 40, z: -40 }, { x: -40, z: -40 },
+  { x: 0, z: 42 }, { x: 0, z: -42 }, { x: 42, z: 0 }, { x: -42, z: 0 },
+  { x: 28, z: 8 }, { x: -28, z: 8 }, { x: 8, z: 28 }, { x: 8, z: -28 },
+];
+const JUGG_CENTER = { x: 0, z: 0 };
+const JUGG_ROUND_MS = 75000;     // tiempo para eliminar al gigante
+const JUGG_GAP = 6500;           // pausa entre rondas (mostrar resultado)
+const JUGG_BASE_HP = 600;        // vida base del gigante
+const JUGG_HP_PER_HUNTER = 90;   // + vida por cada cazador (escala con la cantidad)
+const JUGG_DMG_MULT = 2.4;       // el gigante pega mucho más fuerte
+const JUGG_SCALE = 1.8;          // tamaño visual y hitbox del gigante
+const JUGG_SPEED_MULT = 0.9;     // un poco más lento por ser enorme
+
 function buildAABBs(obst) {
   return obst.map(o => ({ minx: o.x - o.w / 2, maxx: o.x + o.w / 2, minz: o.z - o.d / 2, maxz: o.z + o.d / 2, miny: 0, maxy: o.h }));
 }
@@ -162,6 +187,18 @@ const MAPS = {
     pickupSpawns: [{ id: 'p0', x: -8, z: 0, weapon: 'sniper' }, { id: 'p1', x: 8, z: 0, weapon: 'shotgun' }],
     medkitSpawns: [{ id: 'm0', x: 0, z: 9 }, { id: 'm1', x: 0, z: -9 }],
     ammocrates: [{ x: -20, z: 0 }, { x: 20, z: 0 }],
+  },
+  juggernaut: {
+    theme: 'coliseo',
+    obstacles: OBST_JUGG, aabbs: buildAABBs(OBST_JUGG), spawns: SPAWNS_JUGG,
+    jumppads: [], powerPos: { x: 0, z: 0, minY: 999 }, // sin power-up
+    pickupSpawns: [
+      { id: 'p0', x: 16, z: 16, weapon: 'shotgun' }, { id: 'p1', x: -16, z: -16, weapon: 'rifle' },
+      { id: 'p2', x: 16, z: -16, weapon: 'smg' }, { id: 'p3', x: -16, z: 16, weapon: 'sniper' },
+      { id: 'p4', x: 38, z: 0, weapon: 'sniper' }, { id: 'p5', x: -38, z: 0, weapon: 'shotgun' },
+    ],
+    medkitSpawns: [{ id: 'm0', x: 24, z: 0 }, { id: 'm1', x: -24, z: 0 }, { id: 'm2', x: 0, z: 24 }, { id: 'm3', x: 0, z: -24 }],
+    ammocrates: [{ x: 36, z: 36 }, { x: -36, z: -36 }],
   },
 };
 const DUEL_ROUNDS = 5;
@@ -322,9 +359,11 @@ function createGame(mode) {
 function adjustBots(g) {
   if (!g || g.mode === 'duel') return;
   const desired = Math.max(0, BOT_COUNT - playersIn(g).length);
-  while (g.bots.length > desired) {                 // quitar (preferir bots muertos)
-    const di = g.bots.findIndex(b => !b.alive);
-    g.bots.splice(di >= 0 ? di : g.bots.length - 1, 1);
+  while (g.bots.length > desired) {                 // quitar (preferir muertos; nunca al gigante)
+    let di = g.bots.findIndex(b => !b.alive && !b.isJugg);
+    if (di < 0) di = g.bots.findIndex(b => !b.isJugg);
+    if (di < 0) break;                              // solo queda el gigante
+    g.bots.splice(di, 1);
   }
   while (g.bots.length < desired) g.bots.push(spawnBot(g)); // reponer
   if (g.mode === 'teams') g.bots.forEach((b, idx) => { b.team = idx % 2 === 0 ? 'A' : 'B'; });
@@ -341,7 +380,14 @@ function createDuelGame() {
     lastWinnerName: null, finalWinnerId: null,
   };
 }
-const games = { ffa: createGame('ffa'), teams: createGame('teams'), duel: createDuelGame() };
+function createJuggGame() {
+  const g = createGame('juggernaut');           // crea bots y el mapa coliseo
+  g.juggState = 'fighting'; g.round = 0; g.timer = 0; g.roundEnd = 0;
+  g.juggId = null; g.juggIsPlayer = false; g.juggName = ''; g.juggHP = JUGG_BASE_HP; g.lastResult = null;
+  startJuggRound(g);
+  return g;
+}
+const games = { ffa: createGame('ffa'), teams: createGame('teams'), duel: createDuelGame(), juggernaut: createJuggGame() };
 const gameOf = (p) => games[p.mode] || games.ffa;
 
 // ----------------------------- Daño y muertes -------------------------------
@@ -387,6 +433,11 @@ function handleKill(g, victimType, victim) {
     if (g.mode === 'teams' && killerTeam) g.teamScore[killerTeam] += points;
   }
   io.to(g.mode).emit('killfeed', { killer: killerName, victim: victim.name || 'BOT', victimType, head: !!(by && by.head) });
+  if (g.mode === 'juggernaut' && victim.isJugg) {        // murió el gigante → ganan los cazadores
+    if (victimType === 'player') { victim.deaths = (victim.deaths || 0) + 1; victim.streak = 0; io.to(victim.id).emit('died', { by: killerName, jugg: true }); }
+    endJuggRound(g, 'hunters');
+    return;
+  }
   if (victimType === 'player') {
     victim.deaths = (victim.deaths || 0) + 1;
     victim.streak = 0;
@@ -412,10 +463,14 @@ function respawnPlayer(g, p) {
 }
 
 // ------------------------------ Disparo -------------------------------------
+// Juggernaut: el cazador solo daña al gigante; el gigante solo daña a cazadores.
+function juggValidTarget(shooter, ent) { return shooter.isJugg ? !ent.isJugg : !!ent.isJugg; }
+
 function handleShot(g, shooter, weaponKey, origin, rays) {
   const w = WEAPONS[weaponKey];
   if (!w) return [];
   if (g.mode === 'duel' && g.duelState !== 'playing') return []; // sin daño fuera de la ronda
+  if (g.mode === 'juggernaut' && g.juggState !== 'fighting') return [];
   const results = [];
   const ps = playersIn(g);
   const list = rays.slice(0, w.pellets);
@@ -423,17 +478,19 @@ function handleShot(g, shooter, weaponKey, origin, rays) {
     const d = normalize(r);
     let best = null, bestT = w.range;
     const test = (ent, type) => {
-      const tHead = raySphere(origin, d, { x: ent.x, y: ent.y + 1.75, z: ent.z }, 0.42);
-      const tBody = raySphere(origin, d, { x: ent.x, y: ent.y + 1.0, z: ent.z }, 0.95);
+      const s = ent.isJugg ? JUGG_SCALE : 1;   // el gigante es un blanco más grande
+      const tHead = raySphere(origin, d, { x: ent.x, y: ent.y + 1.75 * s, z: ent.z }, 0.42 * s);
+      const tBody = raySphere(origin, d, { x: ent.x, y: ent.y + 1.0 * s, z: ent.z }, 0.95 * s);
       let t = -1, head = false;
       if (tHead > 0 && (tBody <= 0 || tHead < tBody)) { t = tHead; head = true; }
       else if (tBody > 0) { t = tBody; }
       if (t > 0 && t < bestT) { bestT = t; best = { type, ent, head }; }
     };
-    for (const p of ps) { if (p.id === shooter.id || !p.alive || sameTeam(g, shooter.team, p.team)) continue; test(p, 'player'); }
-    for (const b of g.bots) { if (!b.alive || sameTeam(g, shooter.team, b.team)) continue; test(b, 'bot'); }
+    const jug = g.mode === 'juggernaut';
+    for (const p of ps) { if (p.id === shooter.id || !p.alive || sameTeam(g, shooter.team, p.team)) continue; if (jug && !juggValidTarget(shooter, p)) continue; test(p, 'player'); }
+    for (const b of g.bots) { if (!b.alive || sameTeam(g, shooter.team, b.team)) continue; if (jug && !juggValidTarget(shooter, b)) continue; test(b, 'bot'); }
     if (best && !obstacleBlocks(g.map.aabbs, origin.x, origin.y, origin.z, d.x, d.y, d.z, bestT)) {
-      const base = shooter.god ? 99999 : w.damage * (shooter.boosted ? 2 : 1);
+      const base = shooter.god ? 99999 : w.damage * (shooter.boosted ? 2 : 1) * (shooter.isJugg ? JUGG_DMG_MULT : 1);
       const dmg = base * (best.head ? HEADSHOT_MULT : 1);
       const dealt = applyDamage(g, best.type, best.ent, dmg, shooter, best.head);
       if (dealt > 0) results.push({ type: best.type, id: best.ent.id, killed: !best.ent.alive, dmg: dealt, head: best.head });
@@ -663,6 +720,165 @@ function broadcastDuelState(g) {
   });
 }
 
+// ---------------------- Modo Juggernaut (cazar al gigante) ------------------
+function juggGiantEnt(g) {
+  if (!g.juggId) return null;
+  if (g.juggIsPlayer) { const p = players.get(g.juggId); return p && p.alive ? p : null; }
+  const b = g.bots.find(x => x.id === g.juggId); return b && b.alive ? b : null;
+}
+// Elige al gigante: PRIORIDAD a un jugador al azar; si no hay jugadores, un bot. Evita repetir el anterior.
+function pickGiant(g) {
+  const ps = playersIn(g);
+  const pool = ps.length ? ps : g.bots;
+  if (!pool.length) return null;
+  let cands = pool.filter(e => e.id !== g.juggId);
+  if (!cands.length) cands = pool;
+  const e = cands[Math.floor(Math.random() * cands.length)];
+  return { id: e.id, ent: e, isPlayer: players.has(e.id) };
+}
+function startJuggRound(g) {
+  const now = Date.now();
+  g.round++;
+  g.juggState = 'fighting';
+  for (const p of playersIn(g)) p.isJugg = false;
+  for (const b of g.bots) b.isJugg = false;
+
+  const pick = pickGiant(g);
+  const hunters = Math.max(1, playersIn(g).length + g.bots.length - 1);
+  g.juggHP = JUGG_BASE_HP + JUGG_HP_PER_HUNTER * hunters;   // más cazadores → gigante más resistente
+
+  if (pick) {
+    const ent = pick.ent;
+    ent.isJugg = true;
+    g.juggId = pick.id; g.juggIsPlayer = pick.isPlayer; g.juggName = ent.name || 'BOT';
+    ent.x = JUGG_CENTER.x; ent.z = JUGG_CENTER.z; ent.y = 0; ent.alive = true; ent.health = g.juggHP; ent.lastHurtBy = null;
+    if (pick.isPlayer) {
+      ent.weapon = ent.startWeapon; ent.invulnUntil = now + 1500;
+      io.to(ent.id).emit('respawn', { x: ent.x, y: 0, z: ent.z, weapon: ent.weapon, jugg: true, hp: g.juggHP });
+    }
+  } else { g.juggId = null; g.juggIsPlayer = false; g.juggName = '—'; }
+
+  for (const p of playersIn(g)) {                            // cazadores (jugadores) alrededor
+    if (p.isJugg) continue;
+    const s = spawnPoint(g);
+    p.x = s.x; p.z = s.z; p.y = 0; p.health = PLAYER_HP; p.alive = true; p.weapon = p.startWeapon; p.lastHurtBy = null;
+    p.invulnUntil = now + 1500;
+    io.to(p.id).emit('respawn', { x: p.x, y: 0, z: p.z, weapon: p.weapon });
+  }
+  for (const b of g.bots) {                                  // cazadores (bots)
+    if (b.isJugg) continue;
+    const s = spawnPoint(g);
+    b.x = s.x; b.z = s.z; b.y = 0; b.health = BOT_HP; b.alive = true; b.lastHurtBy = null; b.lastSeen = 0; b.avoidSide = 0; b.weapon = randomBotWeapon();
+  }
+  for (const pk of g.pickups) { pk.active = true; pk.respawnAt = 0; }
+  for (const mk of g.medkits) { mk.active = true; mk.respawnAt = 0; }
+  g.drops = [];
+  g.roundEnd = now + JUGG_ROUND_MS;
+  io.to('juggernaut').emit('announce', { text: `👹 Ronda ${g.round}: ${g.juggName} es el JUGGERNAUT — ¡elimínenlo!` });
+}
+function endJuggRound(g, winner) {
+  g.juggState = 'roundover';
+  g.lastResult = winner;
+  g.timer = Date.now() + JUGG_GAP;
+  io.to('juggernaut').emit('announce', { text: winner === 'hunters'
+    ? `🎉 ¡Los cazadores eliminaron a ${g.juggName}!`
+    : `👹 ¡${g.juggName} sobrevivió! Gana el Juggernaut` });
+}
+function updateJuggBots(g, dt) {
+  const now = Date.now();
+  const ps = playersIn(g);
+  const giant = juggGiantEnt(g);
+  for (const b of g.bots) {
+    if (!b.alive) {
+      if (!b.isJugg && now >= b.respawnAt) {                 // los cazadores-bot reaparecen; el gigante no
+        const s = spawnPoint(g);
+        b.x = s.x; b.z = s.z; b.y = 0; b.health = BOT_HP; b.alive = true; b.lastHurtBy = null; b.lastSeen = 0; b.avoidSide = 0; b.weapon = randomBotWeapon();
+      }
+      continue;
+    }
+    const bw = BOT_WEAPONS[b.weapon] || BOT_WEAPONS.rifle;
+    let mvx = 0, mvz = 0, wantMove = false, facing = null;
+    if (b.isJugg) {                                          // GIGANTE-bot: caza al cazador más cercano
+      let t = null, bd = Infinity;
+      const consider = (e) => { if (!e.alive || e.isJugg) return; const dx = e.x - b.x, dz = e.z - b.z, dd = Math.hypot(dx, dz); if (dd < bd) { bd = dd; t = { e, dx, dz, dd }; } };
+      for (const p of ps) consider(p);
+      for (const o of g.bots) if (o !== b) consider(o);
+      if (t) {
+        const inv = 1 / (t.dd || 1), reach = Math.min(bw.range, 48);
+        if (t.dd > reach * 0.55) { mvx = t.dx * inv; mvz = t.dz * inv; wantMove = true; }
+        else { if (now > (b.strafeFlip || 0)) { b.strafe = Math.random() < 0.5 ? 1 : -1; b.strafeFlip = now + 1000 + Math.random() * 1400; } mvx = -t.dz * inv * b.strafe; mvz = t.dx * inv * b.strafe; wantMove = true; }
+        facing = Math.atan2(t.dx, t.dz);
+        if (t.dd < bw.range && !segBlocked(g.map.aabbs, b.x, b.z, t.e.x, t.e.z) && now - b.lastShot > bw.fireMs * 0.8) {
+          b.lastShot = now;
+          if (Math.random() < Math.max(0.2, 1 - t.dd / bw.range) * 0.75) applyDamage(g, players.has(t.e.id) ? 'player' : 'bot', t.e, bw.damage * JUGG_DMG_MULT, { id: b.id, isPlayer: false, isJugg: true });
+          io.to('juggernaut').emit('tracer', { x: b.x, y: 2.4, z: b.z, tx: t.e.x, ty: t.e.y + 1.2, tz: t.e.z, weapon: b.weapon });
+        }
+      }
+    } else if (giant) {                                      // CAZADOR-bot: va a por el gigante
+      const dx = giant.x - b.x, dz = giant.z - b.z, dd = Math.hypot(dx, dz), inv = 1 / (dd || 1), reach = Math.min(bw.range, BOT_VISION);
+      if (dd > reach * 0.7) { mvx = dx * inv; mvz = dz * inv; wantMove = true; }
+      else if (dd < reach * 0.4) { mvx = -dx * inv; mvz = -dz * inv; wantMove = true; }
+      else { if (now > (b.strafeFlip || 0)) { b.strafe = Math.random() < 0.5 ? 1 : -1; b.strafeFlip = now + 1200 + Math.random() * 1600; } mvx = -dz * inv * b.strafe; mvz = dx * inv * b.strafe; wantMove = true; }
+      facing = Math.atan2(dx, dz);
+      if (dd < bw.range && !segBlocked(g.map.aabbs, b.x, b.z, giant.x, giant.z) && now - b.lastShot > bw.fireMs) {
+        b.lastShot = now;
+        if (Math.random() < Math.max(0.18, 1 - dd / bw.range) * 0.7) applyDamage(g, g.juggIsPlayer ? 'player' : 'bot', giant, bw.damage, { id: b.id, isPlayer: false });
+        io.to('juggernaut').emit('tracer', { x: b.x, y: 1.4, z: b.z, tx: giant.x, ty: giant.y + 1.2, tz: giant.z, weapon: b.weapon });
+      }
+    } else {                                                 // sin gigante (transición): vagar
+      const dx = b.wander.x - b.x, dz = b.wander.z - b.z, dist = Math.hypot(dx, dz);
+      if (dist < 2 || now > (b.wanderUntil || 0)) { b.wander = randomWander(g.map); b.wanderUntil = now + 5000; }
+      else { mvx = dx / dist; mvz = dz / dist; wantMove = true; }
+    }
+    if (wantMove) {
+      const a = avoidDir(g.map, b, mvx, mvz);
+      const sp = BOT_SPEED * (b.isJugg ? JUGG_SPEED_MULT : 1) * dt;
+      const res = resolve(g.map.obstacles, b.x + a.x * sp, b.z + a.z * sp, b.isJugg ? 1.0 : 0.6);
+      b.x = clamp(res.x, -49, 49); b.z = clamp(res.z, -49, 49);
+      if (facing !== null) b.ry = facing; else b.ry = turnToward(b.ry, Math.atan2(a.x, a.z), 7 * dt);
+    } else if (facing !== null) b.ry = facing;
+  }
+}
+function updateJugg(g, dt) {
+  const now = Date.now();
+  if (g.juggState === 'fighting') {
+    const giant = juggGiantEnt(g);
+    if (!giant) endJuggRound(g, 'hunters');                  // el gigante desapareció → ganan cazadores
+    else if (now >= g.roundEnd) endJuggRound(g, 'giant');    // se acabó el tiempo → gana el gigante
+    else {
+      updateJuggBots(g, dt);
+      for (const p of playersIn(g)) if (!p.alive && !p.isJugg && now >= p.respawnAt) respawnPlayer(g, p);
+      for (const pk of g.pickups) if (!pk.active && now >= pk.respawnAt) pk.active = true;
+      for (const mk of g.medkits) if (!mk.active && now >= mk.respawnAt) mk.active = true;
+      if (g.drops.length) g.drops = g.drops.filter(d => d.until > now);
+    }
+  } else if (g.juggState === 'roundover') {
+    if (now >= g.timer) startJuggRound(g);                   // nueva ronda, nuevo gigante
+  }
+  broadcastJuggState(g);
+}
+function broadcastJuggState(g) {
+  const now = Date.now();
+  const ps = playersIn(g);
+  const giant = juggGiantEnt(g);
+  const playersArr = ps.map(p => { const o = playerObj(p); o.isJugg = !!p.isJugg; if (p.isJugg) o.maxHealth = g.juggHP; return o; });
+  const botsArr = g.bots.map(b => ({ id: b.id, x: b.x, y: b.y, z: b.z, ry: b.ry, health: b.health, maxHealth: b.isJugg ? g.juggHP : BOT_HP, alive: b.alive, weapon: b.weapon, team: null, isJugg: !!b.isJugg }));
+  const jugg = {
+    state: g.juggState, round: g.round, juggId: g.juggId, juggName: g.juggName,
+    juggHealth: giant ? Math.max(0, Math.round(giant.health)) : 0, juggMax: g.juggHP, scale: JUGG_SCALE,
+    timeLeft: g.juggState === 'fighting' ? Math.max(0, g.roundEnd - now) : 0,
+    result: g.juggState === 'roundover' ? g.lastResult : null,
+    countdown: g.juggState === 'roundover' ? Math.max(0, g.timer - now) : 0,
+  };
+  io.to('juggernaut').emit('state', {
+    players: playersArr, bots: botsArr,
+    pickups: g.pickups.map(p => ({ id: p.id, x: p.x, z: p.z, weapon: p.weapon, active: p.active })),
+    medkits: g.medkits.map(m => ({ id: m.id, x: m.x, z: m.z, active: m.active })),
+    drops: g.drops.map(d => ({ id: d.id, x: d.x, z: d.z, weapon: d.weapon, until: d.until })),
+    leaderId: null, power: { active: false }, mode: 'juggernaut', teamScore: { A: 0, B: 0 }, jugg, timeLeft: jugg.timeLeft, phase: 'playing',
+  });
+}
+
 let last = Date.now();
 setInterval(() => {
   const now = Date.now();
@@ -671,6 +887,7 @@ setInterval(() => {
   updateGame(games.ffa, dt);
   updateGame(games.teams, dt);
   updateDuel(games.duel, dt);
+  updateJugg(games.juggernaut, dt);
 }, TICK_MS);
 
 function playerObj(p) {
@@ -695,9 +912,12 @@ function broadcastState(g) {
 
 // Contadores de jugadores por modo (para el lobby)
 function modeCounts() {
-  let ffa = 0, teams = 0, duel = 0;
-  for (const [, p] of players) { if (p.mode === 'teams') teams++; else if (p.mode === 'duel') duel++; else ffa++; }
-  return { ffa, teams, duel };
+  let ffa = 0, teams = 0, duel = 0, juggernaut = 0;
+  for (const [, p] of players) {
+    if (p.mode === 'teams') teams++; else if (p.mode === 'duel') duel++;
+    else if (p.mode === 'juggernaut') juggernaut++; else ffa++;
+  }
+  return { ffa, teams, duel, juggernaut };
 }
 function sendCounts() { io.emit('counts', modeCounts()); }
 
@@ -708,11 +928,11 @@ io.on('connection', (socket) => {
   socket.on('join', (data) => {
     const weapon = WEAPONS[data?.weapon]?.starter ? data.weapon : 'pistol';
     let mode = data?.mode;
-    if (mode !== 'teams' && mode !== 'duel') mode = 'ffa';
+    if (mode !== 'teams' && mode !== 'duel' && mode !== 'juggernaut') mode = 'ffa';
     // Duelo: capacidad máxima 2 — si ya están los dos, no se puede unir
     if (mode === 'duel' && playersIn(games.duel).length >= 2) { socket.emit('duelFull', {}); return; }
     const g = games[mode];
-    socket.leave('ffa'); socket.leave('teams'); socket.leave('duel'); socket.join(mode);
+    socket.leave('ffa'); socket.leave('teams'); socket.leave('duel'); socket.leave('juggernaut'); socket.join(mode);
     const s = spawnPoint(g);
     const p = {
       id: socket.id, name: (String(data?.name || 'Jugador')).slice(0, 16) || 'Jugador', mode,
@@ -751,7 +971,7 @@ io.on('connection', (socket) => {
     if (now - p.lastShot < w.fireRate * 0.6) return;
     p.lastShot = now;
     const g = gameOf(p);
-    const hits = handleShot(g, { id: p.id, isPlayer: true, god: p.god, boosted: now < (p.boostUntil || 0), team: p.team }, p.weapon, d.origin, d.rays || []);
+    const hits = handleShot(g, { id: p.id, isPlayer: true, god: p.god, boosted: now < (p.boostUntil || 0), team: p.team, isJugg: !!p.isJugg }, p.weapon, d.origin, d.rays || []);
     if (hits.length) socket.emit('hit', { hits });
     const r0 = d.rays?.[0] || { x: 0, y: 0, z: -1 };
     socket.to(p.mode).emit('tracer', {
@@ -809,7 +1029,10 @@ io.on('connection', (socket) => {
         resetDuel(g);
       } else if (rest.length === 0) resetDuel(g);
     } else {
-      adjustBots(games[p.mode]); // al salir el jugador, vuelve un bot
+      const g = games[p.mode];
+      // Juggernaut: si el que se fue era el gigante, termina la ronda (ganan los cazadores)
+      if (p.mode === 'juggernaut' && p.isJugg && g.juggState === 'fighting') endJuggRound(g, 'hunters');
+      adjustBots(g); // al salir el jugador, vuelve un bot
     }
     sendCounts();
   }

@@ -66,6 +66,14 @@
     <div id="duel-overlay" class="hidden">
       <div class="duel-card"><h2 id="duel-title"></h2><p id="duel-sub"></p></div>
     </div>
+    <div id="jugg-hud" class="hidden">
+      <div id="jugg-timer">⏱ 1:15</div>
+      <div id="jugg-bar"><div id="jugg-bar-fill"></div><span id="jugg-bar-label"></span></div>
+      <div id="jugg-objective"></div>
+    </div>
+    <div id="jugg-overlay" class="hidden">
+      <div class="jugg-card"><h2 id="jugg-ov-title"></h2><p id="jugg-ov-sub"></p></div>
+    </div>
     <div id="perf-hud"></div>
     <div id="hitmarker" class="hidden">✕</div>
     <div id="damage-flash"></div>
@@ -169,6 +177,7 @@
         <div id="mode-ffa" class="mode-opt"><div class="micon">⚔️</div><div class="mname">Todos contra todos</div><div class="mdesc">Cada uno por su cuenta</div><div class="mcount">🟢 <span id="count-ffa">0</span> jugando</div></div>
         <div id="mode-teams" class="mode-opt"><div class="micon">🛡️</div><div class="mname">Batalla en equipos</div><div class="mdesc">2 equipos · gana el de más puntos</div><div class="mcount">🟢 <span id="count-teams">0</span> jugando</div></div>
         <div id="mode-duel" class="mode-opt"><div class="micon">🤺</div><div class="mname">Duelo 1v1</div><div class="mdesc">2 jugadores · 5 rondas</div><div class="mcount">🟢 <span id="count-duel">0/2</span></div></div>
+        <div id="mode-jugg" class="mode-opt"><div class="micon">👹</div><div class="mname">Juggernaut</div><div class="mdesc">Todos contra un gigante</div><div class="mcount">🟢 <span id="count-jugg">0</span> jugando</div></div>
       </div>
       <p id="lobby-msg" class="hidden"></p>
       <p class="choose">Elige tu arma inicial</p>
