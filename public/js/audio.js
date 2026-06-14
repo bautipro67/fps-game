@@ -71,6 +71,7 @@ const SHOTS = {
   smg:     { dur: 0.10, cut: 3200, peak: 0.70, thump: 170 },
   shotgun: { dur: 0.30, cut: 1200, peak: 1.00, thump: 85 },
   sniper:  { dur: 0.40, cut: 2400, peak: 1.00, thump: 75 },
+  rocket:  { dur: 0.34, cut: 700,  peak: 1.00, thump: 52 },  // lanzamiento grave y boomy
   botgun:  { dur: 0.20, cut: 2400, peak: 0.60, thump: 120, laser: true },
 };
 

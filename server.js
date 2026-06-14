@@ -49,16 +49,20 @@ const BOT_WEAPONS = {
   shotgun: { damage: 18, fireMs: 950,  range: 18 },
   smg:     { damage: 5,  fireMs: 190,  range: 34 },
   sniper:  { damage: 34, fireMs: 1700, range: 55 },
+  knife:   { damage: 55, fireMs: 600,  range: 4 },
+  rocket:  { damage: 42, fireMs: 1600, range: 60 },
 };
-const BOT_WEAPON_POOL = ['rifle', 'rifle', 'rifle', 'smg', 'smg', 'shotgun', 'shotgun', 'pistol', 'sniper'];
+const BOT_WEAPON_POOL = ['rifle', 'rifle', 'rifle', 'smg', 'smg', 'shotgun', 'shotgun', 'pistol', 'sniper', 'rocket', 'knife'];
 const randomBotWeapon = () => BOT_WEAPON_POOL[Math.floor(Math.random() * BOT_WEAPON_POOL.length)];
 
 const WEAPONS = {
-  pistol:  { name: 'Pistola',  damage: 25, fireRate: 320,  automatic: false, pellets: 1, spread: 0.012, range: 80,  magazine: 12, reload: 1100, reserve: 96,  color: 0xf1c40f, starter: true },
-  rifle:   { name: 'Rifle',    damage: 18, fireRate: 105,  automatic: true,  pellets: 1, spread: 0.022, range: 100, magazine: 30, reload: 1800, reserve: 120, color: 0x2ecc71, starter: true },
-  shotgun: { name: 'Escopeta', damage: 12, fireRate: 800,  automatic: false, pellets: 8, spread: 0.085, range: 32,  magazine: 6,  reload: 2200, reserve: 36,  color: 0xe67e22, starter: true },
-  smg:     { name: 'SMG',      damage: 14, fireRate: 78,   automatic: true,  pellets: 1, spread: 0.030, range: 65,  magazine: 25, reload: 1500, reserve: 150, color: 0x3498db },
-  sniper:  { name: 'Sniper',   damage: 95, fireRate: 1300, automatic: false, pellets: 1, spread: 0.002, range: 200, magazine: 5,  reload: 2600, reserve: 25,  color: 0x9b59b6 },
+  pistol:  { name: 'Pistola',  damage: 25, fireRate: 320,  automatic: false, pellets: 1, spread: 0.012, range: 80,  magazine: 12, reload: 750,  reserve: 96,  color: 0xf1c40f, starter: true },
+  rifle:   { name: 'Rifle',    damage: 18, fireRate: 105,  automatic: true,  pellets: 1, spread: 0.022, range: 100, magazine: 30, reload: 1200, reserve: 120, color: 0x2ecc71, starter: true },
+  shotgun: { name: 'Escopeta', damage: 12, fireRate: 800,  automatic: false, pellets: 8, spread: 0.085, range: 32,  magazine: 6,  reload: 1500, reserve: 36,  color: 0xe67e22, starter: true },
+  smg:     { name: 'SMG',      damage: 14, fireRate: 78,   automatic: true,  pellets: 1, spread: 0.030, range: 65,  magazine: 25, reload: 1000, reserve: 150, color: 0x3498db },
+  sniper:  { name: 'Sniper',   damage: 95, fireRate: 1300, automatic: false, pellets: 1, spread: 0.002, range: 200, magazine: 5,  reload: 1750, reserve: 25,  color: 0x9b59b6 },
+  knife:   { name: 'Cuchillo', damage: 85, fireRate: 450,  automatic: false, pellets: 1, spread: 0,     range: 4,   magazine: 1,  reload: 0,    reserve: 0,   color: 0xbfc7d0, melee: true },
+  rocket:  { name: 'Lanzacohetes', damage: 55, fireRate: 1300, automatic: false, pellets: 1, spread: 0.006, range: 130, magazine: 3, reload: 2200, reserve: 9, color: 0xff5a2a, rocket: true, splash: 5.0, splashDmg: 42 },
 };
 
 // ==================== MAPAS (uno por modo de juego) =========================
@@ -178,7 +182,7 @@ const SPAWNS_BR = (() => {
   return s;
 })();
 const PICKUPS_BR = (() => {                       // armas repartidas por el mapa grande
-  const p = [], w = ['rifle', 'smg', 'shotgun', 'sniper']; let id = 0;
+  const p = [], w = ['rifle', 'smg', 'shotgun', 'sniper', 'rocket', 'knife']; let id = 0;
   for (const [rad, n] of [[52, 7], [92, 9], [128, 8]]) for (let i = 0; i < n; i++) {
     const a = (i / n) * Math.PI * 2 + 0.35, x = Math.round(Math.cos(a) * rad), z = Math.round(Math.sin(a) * rad);
     if (!brBlocked(x, z)) p.push({ id: 'p' + id, x, z, weapon: w[id++ % w.length] });
@@ -220,7 +224,7 @@ const SPAWNS_GG = [
   { x: 0, z: 42 }, { x: 0, z: -42 }, { x: 42, z: 0 }, { x: -42, z: 0 },
   { x: 22, z: 6 }, { x: -22, z: 6 }, { x: 6, z: 22 }, { x: 6, z: -22 },
 ];
-const GG_LADDER = ['rifle', 'smg', 'shotgun', 'sniper', 'pistol']; // escalera: de la mejor a la peor
+const GG_LADDER = ['rifle', 'smg', 'shotgun', 'rocket', 'sniper', 'pistol', 'knife']; // de la mejor a la peor (cuchillo al final)
 const GG_ROUND_GAP = 6000;       // mostrar al ganador antes de la próxima ronda
 
 function buildAABBs(obst) {
@@ -235,8 +239,8 @@ const MAPS = {
     pickupSpawns: [
       { id: 'p0', x: 13, z: 13, weapon: 'smg' }, { id: 'p1', x: -13, z: -13, weapon: 'sniper' },
       { id: 'p2', x: 13, z: -13, weapon: 'shotgun' }, { id: 'p3', x: -13, z: 13, weapon: 'rifle' },
-      { id: 'p4', x: 0, z: 38, weapon: 'sniper' }, { id: 'p5', x: 0, z: -38, weapon: 'smg' },
-      { id: 'p6', x: 38, z: 0, weapon: 'shotgun' }, { id: 'p7', x: -38, z: 0, weapon: 'pistol' },
+      { id: 'p4', x: 0, z: 38, weapon: 'rocket' }, { id: 'p5', x: 0, z: -38, weapon: 'smg' },
+      { id: 'p6', x: 38, z: 0, weapon: 'shotgun' }, { id: 'p7', x: -38, z: 0, weapon: 'knife' },
     ],
     medkitSpawns: [{ id: 'm0', x: 22, z: 0 }, { id: 'm1', x: -22, z: 0 }, { id: 'm2', x: 0, z: 22 }, { id: 'm3', x: 0, z: -22 }],
     ammocrates: [{ x: 27, z: 27 }, { x: -27, z: -27 }],
@@ -250,7 +254,7 @@ const MAPS = {
     pickupSpawns: [
       { id: 'p0', x: 20, z: 0, weapon: 'sniper' }, { id: 'p1', x: -20, z: 0, weapon: 'sniper' },
       { id: 'p2', x: 0, z: 24, weapon: 'shotgun' }, { id: 'p3', x: 0, z: -24, weapon: 'shotgun' },
-      { id: 'p4', x: 28, z: 22, weapon: 'smg' }, { id: 'p5', x: -28, z: -22, weapon: 'smg' },
+      { id: 'p4', x: 28, z: 22, weapon: 'rocket' }, { id: 'p5', x: -28, z: -22, weapon: 'knife' },
       { id: 'p6', x: 28, z: -22, weapon: 'rifle' }, { id: 'p7', x: -28, z: 22, weapon: 'rifle' },
     ],
     medkitSpawns: [{ id: 'm0', x: 0, z: 20 }, { id: 'm1', x: 0, z: -20 }, { id: 'm2', x: 26, z: 0 }, { id: 'm3', x: -26, z: 0 }],
@@ -260,7 +264,7 @@ const MAPS = {
     theme: 'duelo',
     obstacles: OBST_DUEL, aabbs: buildAABBs(OBST_DUEL), spawns: [DUEL_SPAWN_A, DUEL_SPAWN_B],
     jumppads: [], powerPos: { x: 0, z: 0, minY: 999 }, // sin power-up en el duelo
-    pickupSpawns: [{ id: 'p0', x: -8, z: 0, weapon: 'sniper' }, { id: 'p1', x: 8, z: 0, weapon: 'shotgun' }],
+    pickupSpawns: [{ id: 'p0', x: -8, z: 0, weapon: 'sniper' }, { id: 'p1', x: 8, z: 0, weapon: 'shotgun' }, { id: 'p2', x: 0, z: 20, weapon: 'rocket' }, { id: 'p3', x: 0, z: -20, weapon: 'knife' }],
     medkitSpawns: [{ id: 'm0', x: 0, z: 9 }, { id: 'm1', x: 0, z: -9 }],
     ammocrates: [{ x: -20, z: 0 }, { x: 20, z: 0 }],
   },
@@ -271,7 +275,7 @@ const MAPS = {
     pickupSpawns: [
       { id: 'p0', x: 16, z: 16, weapon: 'shotgun' }, { id: 'p1', x: -16, z: -16, weapon: 'rifle' },
       { id: 'p2', x: 16, z: -16, weapon: 'smg' }, { id: 'p3', x: -16, z: 16, weapon: 'sniper' },
-      { id: 'p4', x: 38, z: 0, weapon: 'sniper' }, { id: 'p5', x: -38, z: 0, weapon: 'shotgun' },
+      { id: 'p4', x: 38, z: 0, weapon: 'rocket' }, { id: 'p5', x: -38, z: 0, weapon: 'knife' },
     ],
     medkitSpawns: [{ id: 'm0', x: 24, z: 0 }, { id: 'm1', x: -24, z: 0 }, { id: 'm2', x: 0, z: 24 }, { id: 'm3', x: 0, z: -24 }],
     ammocrates: [{ x: 36, z: 36 }, { x: -36, z: -36 }],
@@ -384,6 +388,11 @@ function turnToward(cur, want, maxStep) {
   while (d > Math.PI) d -= Math.PI * 2;
   while (d < -Math.PI) d += Math.PI * 2;
   return cur + clamp(d, -maxStep, maxStep);
+}
+// Efecto visual del disparo de un bot según su arma (cohete = explosión; cuchillo = nada; resto = estela)
+function botShotFx(room, b, tx, ty, tz) {
+  if (b.weapon === 'rocket') io.to(room).emit('rocket', { x: b.x, y: 1.7, z: b.z, ix: tx, iy: ty, iz: tz });
+  else if (b.weapon !== 'knife') io.to(room).emit('tracer', { x: b.x, y: 1.4, z: b.z, tx, ty, tz, weapon: b.weapon });
 }
 function randomWander(map) {
   const r = mapBound(map) - 3;
@@ -595,6 +604,41 @@ function respawnPlayer(g, p) {
 // Juggernaut: el cazador solo daña al gigante; el gigante solo daña a cazadores.
 function juggValidTarget(shooter, ent) { return shooter.isJugg ? !ent.isJugg : !!ent.isJugg; }
 
+// Lanzacohetes: impacto directo + salpicadura en área alrededor del punto de impacto.
+function rocketShot(g, shooter, w, origin, ray) {
+  const d = normalize(ray);
+  const ps = playersIn(g), jug = g.mode === 'juggernaut';
+  const valid = (ent) => !sameTeam(g, shooter.team, ent.team) && !(jug && !juggValidTarget(shooter, ent));
+  // 1) punto de impacto: lo primero que toca el cohete (suelo, pared o entidad)
+  let impactT = w.range, directEnt = null;
+  if (d.y < -1e-4) { const tf = -origin.y / d.y; if (tf > 0 && tf < impactT) { impactT = tf; directEnt = null; } } // suelo (y=0)
+  for (const b of g.map.aabbs) { const t = rayAABB(origin.x, origin.y, origin.z, d.x, d.y, d.z, b, impactT); if (t >= 0 && t < impactT) { impactT = t; directEnt = null; } }
+  const testDirect = (ent) => {
+    if (ent.id === shooter.id || !ent.alive || !valid(ent)) return;
+    const s = ent.isJugg ? JUGG_SCALE : 1;
+    const t = raySphere(origin, d, { x: ent.x, y: ent.y + 1.0 * s, z: ent.z }, 0.95 * s);
+    if (t > 0 && t < impactT) { impactT = t; directEnt = ent; }
+  };
+  for (const p of ps) testDirect(p);
+  for (const b of g.bots) testDirect(b);
+  const ix = origin.x + d.x * impactT, iy = origin.y + d.y * impactT, iz = origin.z + d.z * impactT;
+  // 2) salpicadura: daño a todo lo cercano al impacto (con caída y sin atravesar paredes)
+  const results = [];
+  const splash = (ent, type) => {
+    if (ent.id === shooter.id || !ent.alive || !valid(ent)) return;
+    const dist = Math.hypot(ent.x - ix, ent.z - iz);
+    if (dist > w.splash || segBlocked(g.map.aabbs, ix, iz, ent.x, ent.z)) return;
+    let dmg = w.splashDmg * (1 - dist / w.splash) + (ent === directEnt ? w.damage : 0);
+    dmg = shooter.god ? 99999 : dmg * (shooter.boosted ? 2 : 1);
+    const dealt = applyDamage(g, type, ent, dmg, shooter, false);
+    if (dealt > 0) results.push({ type, id: ent.id, killed: !ent.alive, dmg: dealt, head: false });
+  };
+  for (const p of ps) splash(p, 'player');
+  for (const b of g.bots) splash(b, 'bot');
+  io.to(g.mode).emit('rocket', { x: origin.x, y: origin.y, z: origin.z, ix, iy, iz });
+  return results;
+}
+
 function handleShot(g, shooter, weaponKey, origin, rays) {
   const w = WEAPONS[weaponKey];
   if (!w) return [];
@@ -602,6 +646,7 @@ function handleShot(g, shooter, weaponKey, origin, rays) {
   if (g.mode === 'juggernaut' && g.juggState !== 'fighting') return [];
   if (g.mode === 'br' && g.brState !== 'playing') return [];
   if (g.mode === 'gungame' && g.ggState !== 'playing') return [];
+  if (w.rocket) return rocketShot(g, shooter, w, origin, rays[0] || { x: 0, y: 0, z: -1 });
   const results = [];
   const ps = playersIn(g);
   const list = rays.slice(0, w.pellets);
@@ -672,7 +717,7 @@ function updateBots(g, dt) {
         b.lastShot = now;
         const hitChance = Math.max(0.16, 1 - vis.dist / bw.range) * 0.72;
         if (Math.random() < hitChance) applyDamage(g, vis.type, vis.ent, bw.damage, { id: b.id, isPlayer: false });
-        io.to(g.mode).emit('tracer', { x: b.x, y: 1.4, z: b.z, tx: vis.ent.x, ty: vis.ent.y + 1.2, tz: vis.ent.z, weapon: b.weapon });
+        botShotFx(g.mode, b, vis.ent.x, vis.ent.y + 1.2, vis.ent.z);
       }
     } else if (b.lastSeen && now - b.lastSeen < 1600) {
       // perdió el tiro un instante (cobertura): va a la última posición conocida en vez de re-vagabundear (evita el giro)
@@ -943,7 +988,7 @@ function updateJuggBots(g, dt) {
         if (t.dd < bw.range && !segBlocked(g.map.aabbs, b.x, b.z, t.e.x, t.e.z) && now - b.lastShot > bw.fireMs * 0.8) {
           b.lastShot = now;
           if (Math.random() < Math.max(0.2, 1 - t.dd / bw.range) * 0.75) applyDamage(g, players.has(t.e.id) ? 'player' : 'bot', t.e, bw.damage * JUGG_DMG_MULT, { id: b.id, isPlayer: false, isJugg: true });
-          io.to('juggernaut').emit('tracer', { x: b.x, y: 2.4, z: b.z, tx: t.e.x, ty: t.e.y + 1.2, tz: t.e.z, weapon: b.weapon });
+          botShotFx('juggernaut', b, t.e.x, t.e.y + 1.2, t.e.z);
         }
       }
     } else if (giant) {                                      // CAZADOR-bot: va a por el gigante
@@ -955,7 +1000,7 @@ function updateJuggBots(g, dt) {
       if (dd < bw.range && !segBlocked(g.map.aabbs, b.x, b.z, giant.x, giant.z) && now - b.lastShot > bw.fireMs) {
         b.lastShot = now;
         if (Math.random() < Math.max(0.18, 1 - dd / bw.range) * 0.7) applyDamage(g, g.juggIsPlayer ? 'player' : 'bot', giant, bw.damage, { id: b.id, isPlayer: false });
-        io.to('juggernaut').emit('tracer', { x: b.x, y: 1.4, z: b.z, tx: giant.x, ty: giant.y + 1.2, tz: giant.z, weapon: b.weapon });
+        botShotFx('juggernaut', b, giant.x, giant.y + 1.2, giant.z);
       }
     } else {                                                 // sin gigante (transición): vagar
       const dx = b.wander.x - b.x, dz = b.wander.z - b.z, dist = Math.hypot(dx, dz);
@@ -1111,7 +1156,7 @@ function updateBRBots(g, dt) {
         if (vis.dd < bw.range && now - b.lastShot > bw.fireMs) {
           b.lastShot = now;
           if (Math.random() < Math.max(0.18, 1 - vis.dd / bw.range) * 0.7) applyDamage(g, players.has(vis.e.id) ? 'player' : 'bot', vis.e, bw.damage, { id: b.id, isPlayer: false });
-          io.to('br').emit('tracer', { x: b.x, y: 1.4, z: b.z, tx: vis.e.x, ty: vis.e.y + 1.2, tz: vis.e.z, weapon: b.weapon });
+          botShotFx('br', b, vis.e.x, vis.e.y + 1.2, vis.e.z);
         }
       } else {                                            // vagar, manteniéndose dentro de la zona segura
         const dx = b.wander.x - b.x, dz = b.wander.z - b.z, dist = Math.hypot(dx, dz);
@@ -1331,6 +1376,7 @@ io.on('connection', (socket) => {
     const g = gameOf(p);
     const hits = handleShot(g, { id: p.id, isPlayer: true, god: p.god, boosted: now < (p.boostUntil || 0), team: p.team, isJugg: !!p.isJugg }, p.weapon, d.origin, d.rays || []);
     if (hits.length) socket.emit('hit', { hits });
+    if (w.rocket || w.melee) return;                 // el cohete usa su propio evento; el cuchillo no deja estela
     const r0 = d.rays?.[0] || { x: 0, y: 0, z: -1 };
     socket.to(p.mode).emit('tracer', {
       x: d.origin.x, y: d.origin.y, z: d.origin.z,
@@ -1361,7 +1407,7 @@ io.on('connection', (socket) => {
     if (!p || !p.alive || p.health >= PLAYER_HP) return;
     const mk = gameOf(p).medkits.find(x => x.id === id);
     if (!mk || !mk.active) return;
-    if (Math.hypot(mk.x - p.x, mk.z - p.z) < 2.5) {
+    if (Math.hypot(mk.x - p.x, mk.z - p.z) < 4) {  // tolerante: el cliente solo lo pide si está cerca de verdad; la pos. del server llega a 20Hz (con retraso)
       mk.active = false; mk.respawnAt = Date.now() + MEDKIT_RESPAWN;
       p.health = Math.min(PLAYER_HP, p.health + MEDKIT_HEAL);
       socket.emit('healed', { health: p.health });
