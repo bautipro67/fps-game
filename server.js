@@ -62,7 +62,7 @@ const WEAPONS = {
   smg:     { name: 'SMG',      damage: 14, fireRate: 78,   automatic: true,  pellets: 1, spread: 0.030, range: 65,  magazine: 25, reload: 1000, reserve: 150, color: 0x3498db },
   sniper:  { name: 'Sniper',   damage: 95, fireRate: 1300, automatic: false, pellets: 1, spread: 0.002, range: 200, magazine: 5,  reload: 1750, reserve: 25,  color: 0x9b59b6 },
   knife:   { name: 'Cuchillo', damage: 85, fireRate: 450,  automatic: false, pellets: 1, spread: 0,     range: 4,   magazine: 1,  reload: 0,    reserve: 0,   color: 0xbfc7d0, melee: true },
-  rocket:  { name: 'Lanzacohetes', damage: 55, fireRate: 1300, automatic: false, pellets: 1, spread: 0.006, range: 130, magazine: 3, reload: 2200, reserve: 9, color: 0xff5a2a, rocket: true, splash: 5.0, splashDmg: 42 },
+  rocket:  { name: 'Lanzacohetes', damage: 55, fireRate: 1300, automatic: false, pellets: 1, spread: 0.006, range: 130, magazine: 3, reload: 2200, reserve: 9, color: 0xff5a2a, rocket: true, splash: 6.5, splashDmg: 65 },
 };
 
 // ==================== MAPAS (uno por modo de juego) =========================
