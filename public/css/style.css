@@ -214,6 +214,22 @@ body.mobile #perf-hud { display: none; }
 body.instorm #storm-vignette { opacity: 1; animation: stormPulse 1.3s ease-in-out infinite; }
 @keyframes stormPulse { 50% { opacity: .55; } }
 
+/* HUD del Gun Game (nivel/arma + escalera de progreso) */
+#gg-hud { position: fixed; top: 54px; left: 50%; transform: translateX(-50%); z-index: 16; text-align: center; pointer-events: none; }
+#gg-level { font-family: 'Orbitron','Rajdhani',sans-serif; font-weight: 800; font-size: 18px; letter-spacing: .5px; color: #d7f5c2; background: rgba(10,16,12,.7); border: 1px solid rgba(126,217,87,.5); border-radius: 10px; padding: 4px 16px; display: inline-block; text-shadow: 0 2px 6px rgba(0,0,0,.6); }
+#gg-level b { color: #9be861; }
+#gg-pips { display: flex; gap: 5px; justify-content: center; margin-top: 6px; }
+#gg-pips span { width: 22px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.18); }
+#gg-pips span.done { background: #7ed957; }
+#gg-pips span.cur { background: #d7f5c2; box-shadow: 0 0 8px rgba(126,217,87,.8); }
+
+/* Overlay del Gun Game (fin de ronda) */
+#gg-overlay { position: fixed; inset: 0; z-index: 25; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+#gg-overlay .gg-card { background: rgba(10,14,11,.85); border: 1px solid rgba(126,217,87,.45); border-radius: 16px; padding: 26px 42px; text-align: center; box-shadow: 0 16px 50px rgba(0,0,0,.6); backdrop-filter: blur(3px); }
+#gg-overlay h2 { font-family: 'Orbitron','Rajdhani',sans-serif; font-size: 28px; letter-spacing: 1.5px; }
+#gg-overlay h2.win { color: #9be861; }
+#gg-overlay p { opacity: .82; margin-top: 12px; font-size: 15px; }
+
 /* Marcador por equipos (en partida) */
 #team-scores { position: fixed; top: 60px; left: 50%; transform: translateX(-50%); z-index: 16; display: flex; align-items: center; gap: 12px; }
 .team-box { font-family: 'Orbitron','Rajdhani',sans-serif; font-size: 22px; font-weight: 800; padding: 5px 16px; border-radius: 9px; background: rgba(10,16,24,.7); border: 2px solid transparent; }
@@ -423,6 +439,8 @@ body.mobile #prompt-pickup { top: 58%; font-size: 13px; }
   .team-box { font-size: 17px; padding: 4px 11px; }
   #br-hud { top: 44px; } #br-alive { font-size: 16px; padding: 3px 13px; }
   #br-overlay .br-card { padding: 20px 22px; } #br-overlay h2 { font-size: 22px; }
+  #gg-hud { top: 44px; } #gg-level { font-size: 15px; padding: 3px 12px; } #gg-pips span { width: 18px; }
+  #gg-overlay .gg-card { padding: 20px 22px; } #gg-overlay h2 { font-size: 22px; }
   #notify { top: 112px; font-size: 12.5px; padding: 6px 14px; }
   #boost-indicator, #protect-indicator { top: 92px; font-size: 12px; padding: 5px 14px; }
 

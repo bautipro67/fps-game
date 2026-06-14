@@ -201,6 +201,28 @@ const BR_STORM_TIME = 240000;    // 4 min en cerrarse del todo (partidas más la
 const BR_SAFE_START = 218;       // radio seguro inicial (cubre el mapa enorme entero)
 const BR_SAFE_END = 10;          // radio seguro final (anillo alrededor de la torre central, alcanzable)
 
+// --- Mapa 6: ARSENAL (Gun Game) — arena compacta con cobertura, combate rápido ---
+const OBST_GG = [
+  { x: 0, z: 0, w: 6, d: 6, h: 5 },                          // núcleo central
+  { x: 12, z: 12, w: 4, d: 4, h: 3.5 }, { x: -12, z: 12, w: 4, d: 4, h: 3.5 },
+  { x: 12, z: -12, w: 4, d: 4, h: 3.5 }, { x: -12, z: -12, w: 4, d: 4, h: 3.5 },
+  { x: 0, z: 20, w: 14, d: 2, h: 3 }, { x: 0, z: -20, w: 14, d: 2, h: 3 },
+  { x: 20, z: 0, w: 2, d: 14, h: 3 }, { x: -20, z: 0, w: 2, d: 14, h: 3 },
+  { x: 28, z: 28, w: 5, d: 5, h: 4 }, { x: -28, z: 28, w: 5, d: 5, h: 4 },
+  { x: 28, z: -28, w: 5, d: 5, h: 4 }, { x: -28, z: -28, w: 5, d: 5, h: 4 },
+  { x: 34, z: 8, w: 2, d: 10, h: 3.5 }, { x: -34, z: 8, w: 2, d: 10, h: 3.5 },
+  { x: 34, z: -8, w: 2, d: 10, h: 3.5 }, { x: -34, z: -8, w: 2, d: 10, h: 3.5 },
+  { x: 10, z: 0, w: 3, d: 3, h: 2.5 }, { x: -10, z: 0, w: 3, d: 3, h: 2.5 },
+  { x: 0, z: 10, w: 3, d: 3, h: 2.5 }, { x: 0, z: -10, w: 3, d: 3, h: 2.5 },
+];
+const SPAWNS_GG = [
+  { x: 40, z: 40 }, { x: -40, z: 40 }, { x: 40, z: -40 }, { x: -40, z: -40 },
+  { x: 0, z: 42 }, { x: 0, z: -42 }, { x: 42, z: 0 }, { x: -42, z: 0 },
+  { x: 22, z: 6 }, { x: -22, z: 6 }, { x: 6, z: 22 }, { x: 6, z: -22 },
+];
+const GG_LADDER = ['rifle', 'smg', 'shotgun', 'sniper', 'pistol']; // escalera: de la mejor a la peor
+const GG_ROUND_GAP = 6000;       // mostrar al ganador antes de la próxima ronda
+
 function buildAABBs(obst) {
   return obst.map(o => ({ minx: o.x - o.w / 2, maxx: o.x + o.w / 2, minz: o.z - o.d / 2, maxz: o.z + o.d / 2, miny: 0, maxy: o.h }));
 }
@@ -261,6 +283,15 @@ const MAPS = {
     pickupSpawns: PICKUPS_BR,
     medkitSpawns: MEDKITS_BR,
     ammocrates: [{ x: 30, z: 30 }, { x: -30, z: -30 }, { x: 30, z: -30 }, { x: -30, z: 30 }],
+  },
+  gungame: {
+    theme: 'arsenal', half: 50,
+    obstacles: OBST_GG, aabbs: buildAABBs(OBST_GG), spawns: SPAWNS_GG,
+    jumppads: [{ x: 13, z: 0 }, { x: -13, z: 0 }, { x: 0, z: 13 }, { x: 0, z: -13 }],
+    powerPos: { x: 0, z: 0, minY: 999 }, // sin power-up
+    pickupSpawns: [],                    // sin armas en el mapa: el arma la da tu nivel
+    medkitSpawns: [{ id: 'm0', x: 24, z: 0 }, { id: 'm1', x: -24, z: 0 }, { id: 'm2', x: 0, z: 24 }, { id: 'm3', x: 0, z: -24 }],
+    ammocrates: [],
   },
 };
 const DUEL_ROUNDS = 5;
@@ -379,7 +410,8 @@ function spawnBot(g) {
   const s = spawnPoint(g);
   return {
     id: 'bot' + (botSeq++), name: 'BOT', x: s.x, y: 0, z: s.z, ry: Math.random() * Math.PI * 2,
-    health: BOT_HP, alive: true, target: null, wander: randomWander(g.map), weapon: randomBotWeapon(),
+    health: BOT_HP, alive: true, target: null, wander: randomWander(g.map),
+    weapon: g.mode === 'gungame' ? GG_LADDER[0] : randomBotWeapon(), ggLevel: 0,
     lastShot: 0, respawnAt: 0, lastHurtBy: null, stuck: 0, avoidSide: 0, wanderUntil: 0, lastSeen: 0,
     strafe: 1, strafeFlip: 0, team: null,
   };
@@ -464,7 +496,13 @@ function createBRGame() {
     brWinnerId: null, brWinnerName: null, brTotal: BR_TOTAL,
   };
 }
-const games = { ffa: createGame('ffa'), teams: createGame('teams'), duel: createDuelGame(), juggernaut: createJuggGame(), br: createBRGame() };
+function createGGGame() {
+  const g = createGame('gungame');         // crea bots (ya con arma de nivel 0) y el mapa arsenal
+  g.ggState = 'playing'; g.timer = 0; g.ggWinnerId = null; g.ggWinnerName = null;
+  g.matchEnd = Infinity;                   // sin límite de tiempo: la ronda termina al ganar
+  return g;
+}
+const games = { ffa: createGame('ffa'), teams: createGame('teams'), duel: createDuelGame(), juggernaut: createJuggGame(), br: createBRGame(), gungame: createGGGame() };
 const gameOf = (p) => games[p.mode] || games.ffa;
 
 // ----------------------------- Daño y muertes -------------------------------
@@ -524,6 +562,10 @@ function handleKill(g, victimType, victim) {
     endJuggRound(g, 'hunters');
     return;
   }
+  if (g.mode === 'gungame' && by && g.ggState === 'playing') { // Gun Game: el verdugo sube de arma
+    if (by.isPlayer) { const k = players.get(by.id); if (k && k.alive) ggAdvance(g, k, true); }
+    else if (by.id !== 'storm') { const kb = g.bots.find(x => x.id === by.id); if (kb && kb.alive) ggAdvance(g, kb, false); }
+  }
   if (victimType === 'player') {
     victim.deaths = (victim.deaths || 0) + 1;
     victim.streak = 0;
@@ -532,7 +574,7 @@ function handleKill(g, victimType, victim) {
     io.to(victim.id).emit('died', { by: killerName });
   } else {
     victim.respawnAt = Date.now() + BOT_RESPAWN;
-    if (Math.random() < 0.45) {
+    if (g.mode !== 'gungame' && Math.random() < 0.45) {  // sin drops en Gun Game (arma fija por nivel)
       g.drops.push({ id: 'drop' + (g.dropSeq++), x: victim.x, z: victim.z, weapon: victim.weapon, until: Date.now() + 12000 });
       if (g.drops.length > 10) g.drops.shift();
     }
@@ -543,7 +585,8 @@ function respawnPlayer(g, p) {
   const s = spawnPoint(g, p.team);
   p.x = s.x; p.z = s.z; p.y = 0;
   p.health = PLAYER_HP; p.alive = true;
-  p.weapon = p.startWeapon; p.lastHurtBy = null;
+  p.weapon = g.mode === 'gungame' ? GG_LADDER[p.ggLevel || 0] : p.startWeapon; // Gun Game: arma según nivel
+  p.lastHurtBy = null;
   p.invulnUntil = Date.now() + SPAWN_PROTECT;
   io.to(p.id).emit('respawn', { x: p.x, y: p.y, z: p.z, weapon: p.weapon });
 }
@@ -558,6 +601,7 @@ function handleShot(g, shooter, weaponKey, origin, rays) {
   if (g.mode === 'duel' && g.duelState !== 'playing') return []; // sin daño fuera de la ronda
   if (g.mode === 'juggernaut' && g.juggState !== 'fighting') return [];
   if (g.mode === 'br' && g.brState !== 'playing') return [];
+  if (g.mode === 'gungame' && g.ggState !== 'playing') return [];
   const results = [];
   const ps = playersIn(g);
   const list = rays.slice(0, w.pellets);
@@ -596,7 +640,7 @@ function updateBots(g, dt) {
         const s = spawnPoint(g, b.team);
         b.x = s.x; b.z = s.z; b.y = 0; b.health = BOT_HP; b.alive = true;
         b.target = null; b.lastHurtBy = null; b.stuck = 0; b.avoidSide = 0; b.wanderUntil = 0; b.lastSeen = 0; b.wander = randomWander(g.map);
-        b.weapon = randomBotWeapon();
+        b.weapon = g.mode === 'gungame' ? GG_LADDER[b.ggLevel || 0] : randomBotWeapon();
       }
       continue;
     }
@@ -1131,6 +1175,62 @@ function broadcastBRState(g) {
   });
 }
 
+// ---------------------- Modo Gun Game (escalera de armas) -------------------
+// El verdugo sube de nivel (arma peor). Llegar a la última y matar con ella = ganar.
+function ggAdvance(g, ent, isPlayer) {
+  if (g.ggState !== 'playing') return;
+  ent.ggLevel = (ent.ggLevel || 0) + 1;
+  if (ent.ggLevel >= GG_LADDER.length) { endGGRound(g, ent); return; } // completó la escalera → gana
+  const wpn = GG_LADDER[ent.ggLevel];
+  ent.weapon = wpn;
+  if (isPlayer) {
+    ent.startWeapon = wpn;                                // para que el respawn dé el arma correcta
+    io.to(ent.id).emit('ggLevelUp', { weapon: wpn, level: ent.ggLevel + 1, total: GG_LADDER.length });
+  }
+}
+function endGGRound(g, winner) {
+  g.ggState = 'roundover';
+  g.timer = Date.now() + GG_ROUND_GAP;
+  g.ggWinnerId = winner.id; g.ggWinnerName = winner.name || 'BOT';
+  io.to('gungame').emit('announce', { text: `🏆 ¡${g.ggWinnerName} completó la escalera y gana la ronda!` });
+}
+function resetGGRound(g) {
+  for (const p of playersIn(g)) { p.ggLevel = 0; p.startWeapon = GG_LADDER[0]; respawnPlayer(g, p); }
+  for (const b of g.bots) {
+    b.ggLevel = 0; b.weapon = GG_LADDER[0];
+    const s = spawnPoint(g); b.x = s.x; b.z = s.z; b.y = 0; b.health = BOT_HP; b.alive = true; b.lastHurtBy = null; b.lastSeen = 0; b.avoidSide = 0;
+  }
+  g.ggState = 'playing'; g.ggWinnerId = null; g.ggWinnerName = null;
+  io.to('gungame').emit('announce', { text: `🔫 ¡Nueva ronda de Gun Game! Todos arrancan con ${WEAPONS[GG_LADDER[0]].name}` });
+}
+function updateGG(g, dt) {
+  const now = Date.now();
+  if (g.ggState === 'playing') {
+    updateBots(g, dt);                                   // reusa la IA FFA (bots con su arma de nivel)
+    for (const p of playersIn(g)) if (!p.alive && now >= p.respawnAt) respawnPlayer(g, p);
+    for (const mk of g.medkits) if (!mk.active && now >= mk.respawnAt) mk.active = true;
+  } else if (g.ggState === 'roundover') {
+    if (now >= g.timer) resetGGRound(g);
+  }
+  broadcastGGState(g);
+}
+function broadcastGGState(g) {
+  const ps = playersIn(g);
+  let leaderId = null, lv = -1;                           // líder = quien va más arriba en la escalera
+  const playersArr = ps.map(p => { const o = playerObj(p); o.ggLevel = p.ggLevel || 0; if (o.ggLevel > lv) { lv = o.ggLevel; leaderId = p.id; } return o; });
+  const botsArr = g.bots.map(b => { if (b.alive && (b.ggLevel || 0) > lv) { lv = b.ggLevel || 0; leaderId = b.id; } return { id: b.id, x: b.x, y: b.y, z: b.z, ry: b.ry, health: b.health, maxHealth: BOT_HP, alive: b.alive, weapon: b.weapon, team: null, ggLevel: b.ggLevel || 0 }; });
+  const gg = {
+    state: g.ggState, total: GG_LADDER.length, ladder: GG_LADDER,
+    winnerId: g.ggWinnerId, winnerName: g.ggWinnerName,
+    countdown: g.ggState === 'roundover' ? Math.max(0, g.timer - Date.now()) : 0,
+  };
+  io.to('gungame').emit('state', {
+    players: playersArr, bots: botsArr, pickups: [],
+    medkits: g.medkits.map(m => ({ id: m.id, x: m.x, z: m.z, active: m.active })),
+    drops: [], leaderId, power: { active: false }, mode: 'gungame', teamScore: { A: 0, B: 0 }, gg, timeLeft: 0, phase: 'playing',
+  });
+}
+
 let last = Date.now();
 setInterval(() => {
   const now = Date.now();
@@ -1141,6 +1241,7 @@ setInterval(() => {
   updateDuel(games.duel, dt);
   updateJugg(games.juggernaut, dt);
   updateBR(games.br, dt);
+  updateGG(games.gungame, dt);
 }, TICK_MS);
 
 function playerObj(p) {
@@ -1165,12 +1266,13 @@ function broadcastState(g) {
 
 // Contadores de jugadores por modo (para el lobby)
 function modeCounts() {
-  let ffa = 0, teams = 0, duel = 0, juggernaut = 0, br = 0;
+  let ffa = 0, teams = 0, duel = 0, juggernaut = 0, br = 0, gungame = 0;
   for (const [, p] of players) {
     if (p.mode === 'teams') teams++; else if (p.mode === 'duel') duel++;
-    else if (p.mode === 'juggernaut') juggernaut++; else if (p.mode === 'br') br++; else ffa++;
+    else if (p.mode === 'juggernaut') juggernaut++; else if (p.mode === 'br') br++;
+    else if (p.mode === 'gungame') gungame++; else ffa++;
   }
-  return { ffa, teams, duel, juggernaut, br };
+  return { ffa, teams, duel, juggernaut, br, gungame };
 }
 function sendCounts() { io.emit('counts', modeCounts()); }
 
@@ -1181,13 +1283,13 @@ io.on('connection', (socket) => {
   socket.on('join', (data) => {
     const weapon = WEAPONS[data?.weapon]?.starter ? data.weapon : 'pistol';
     let mode = data?.mode;
-    if (mode !== 'teams' && mode !== 'duel' && mode !== 'juggernaut' && mode !== 'br') mode = 'ffa';
+    if (mode !== 'teams' && mode !== 'duel' && mode !== 'juggernaut' && mode !== 'br' && mode !== 'gungame') mode = 'ffa';
     // Duelo: capacidad máxima 2 — si ya están los dos, no se puede unir
     if (mode === 'duel' && playersIn(games.duel).length >= 2) { socket.emit('duelFull', {}); return; }
     // Battle Royale: bloqueado si ya empezó (o está lleno) hasta la próxima partida
     if (mode === 'br' && (games.br.brState === 'playing' || games.br.brState === 'over' || playersIn(games.br).length >= BR_TOTAL)) { socket.emit('brLocked', {}); return; }
     const g = games[mode];
-    socket.leave('ffa'); socket.leave('teams'); socket.leave('duel'); socket.leave('juggernaut'); socket.leave('br'); socket.join(mode);
+    socket.leave('ffa'); socket.leave('teams'); socket.leave('duel'); socket.leave('juggernaut'); socket.leave('br'); socket.leave('gungame'); socket.join(mode);
     const s = spawnPoint(g);
     const p = {
       id: socket.id, name: (String(data?.name || 'Jugador')).slice(0, 16) || 'Jugador', mode,
@@ -1198,13 +1300,14 @@ io.on('connection', (socket) => {
     };
     players.set(socket.id, p);
     if (mode === 'teams') { p.team = smallerTeam(g); const sp2 = spawnPoint(g, p.team); p.x = sp2.x; p.z = sp2.z; }
+    if (mode === 'gungame') { p.ggLevel = 0; p.startWeapon = GG_LADDER[0]; p.weapon = GG_LADDER[0]; } // todos arrancan igual
     if (mode !== 'duel') adjustBots(g); // el jugador ocupa el lugar de un bot
     socket.to(mode).emit('notify', { text: `👋 ${p.name} se unió a la partida`, kind: 'join' });
     sendCounts();
     socket.emit('init', {
       selfId: socket.id,
       map: { size: (g.map.half || 50) * 2, half: g.map.half || 50, obstacles: g.map.obstacles, eye: EYE, jumppads: g.map.jumppads, ammocrates: g.map.ammocrates, theme: g.map.theme },
-      weapons: WEAPONS, spawn: { x: p.x, y: p.y, z: p.z }, weapon, mode,
+      weapons: WEAPONS, spawn: { x: p.x, y: p.y, z: p.z }, weapon: p.weapon, mode,
       timeLeft: Math.max(0, g.matchEnd - Date.now()), phase: g.phase,
     });
     // Duelo: si ya están los 2, arranca la partida; si no, queda esperando

@@ -138,6 +138,7 @@ socket.on('state', (s) => {
   updateDuelUI(s);                                                           // interfaz del duelo 1v1
   updateJuggUI(s);                                                           // interfaz del Juggernaut
   updateBRUI(s);                                                             // interfaz del Battle Royale
+  updateGGUI(s);                                                             // interfaz del Gun Game
   myJugg = !!(s.jugg && s.jugg.juggId === selfId);                          // ¿soy el gigante?
   if (!joined && !modePicked && s.mode) setMode(s.mode);                     // en el lobby, refleja el modo activo
   const me = s.players.find(p => p.id === selfId);
@@ -182,13 +183,14 @@ socket.on('announce', (d) => { showToast(d.text); sfx.playLocal('multi', 0.45); 
 socket.on('notify', (d) => { showNotify(d.text); sfx.playLocal(d.kind === 'join' ? 'pickup' : 'ui', 0.5); });
 socket.on('boost', (d) => { boostUntil = performance.now() + d.ms; sfx.playLocal('power', 0.8); showToast('⚡ DAÑO x2'); });
 socket.on('counts', (c) => {  // contadores de jugadores por modo (lobby)
-  const a = D('count-ffa'), b = D('count-teams'), du = D('count-duel'), ju = D('count-jugg'), brc = D('count-br'), tot = D('online-count');
+  const a = D('count-ffa'), b = D('count-teams'), du = D('count-duel'), ju = D('count-jugg'), brc = D('count-br'), ggc = D('count-gg'), tot = D('online-count');
   if (a) a.textContent = c.ffa;
   if (b) b.textContent = c.teams;
   if (du) du.textContent = (c.duel || 0) + '/2';
   if (ju) ju.textContent = (c.juggernaut || 0);
   if (brc) brc.textContent = (c.br || 0);
-  if (tot) tot.textContent = c.ffa + c.teams + (c.duel || 0) + (c.juggernaut || 0) + (c.br || 0);
+  if (ggc) ggc.textContent = (c.gungame || 0);
+  if (tot) tot.textContent = c.ffa + c.teams + (c.duel || 0) + (c.juggernaut || 0) + (c.br || 0) + (c.gungame || 0);
 });
 socket.on('duelFull', () => {  // el duelo ya tiene 2 jugadores
   const m = D('lobby-msg');
@@ -203,6 +205,7 @@ socket.on('brLocked', () => {  // el Battle Royale ya empezó (o está lleno)
 });
 socket.on('brEliminated', (d) => { brEliminated = true; brPlace = d.place; sfx.playLocal('death', 0.9); });
 socket.on('brWin', () => { sfx.playLocal('multi', 0.9); });
+socket.on('ggLevelUp', (d) => { setWeapon(d.weapon, true); sfx.playLocal('pickup', 0.85); showToast(`⬆️ Nivel ${d.level}/${d.total}: ${weapons[d.weapon]?.name || ''}`); });
 socket.on('pongcheck', (t) => { pingMs = Math.round(performance.now() - t); });
 setInterval(() => { if (joined) socket.emit('pingcheck', performance.now()); }, 2000);
 socket.on('damaged', (d) => { flashDamage(); sfx.playLocal('damaged', 0.8); showDamageDir(d && d.from); });
@@ -393,9 +396,9 @@ function buildWorld(map) {
   const size = map.size, half = size / 2;
   obstacles = map.obstacles;
   const theme = map.theme || 'arena';
-  const accent = theme === 'frente' ? 0xff7a3c : theme === 'duelo' ? 0xff4d6d : theme === 'coliseo' ? 0xffc24d : theme === 'tormenta' ? 0xb06bff : 0x33d6ff;  // color neón por mapa
-  const accent2 = theme === 'frente' ? 0xffb37a : theme === 'duelo' ? 0xff8aa0 : theme === 'coliseo' ? 0xffe0a0 : theme === 'tormenta' ? 0xd6b3ff : 0x6fe6ff;
-  const floorCol = theme === 'frente' ? 0x4a3a30 : theme === 'duelo' ? 0x33303c : theme === 'coliseo' ? 0x4a4030 : theme === 'tormenta' ? 0x2f3140 : 0x394452;
+  const accent = theme === 'frente' ? 0xff7a3c : theme === 'duelo' ? 0xff4d6d : theme === 'coliseo' ? 0xffc24d : theme === 'tormenta' ? 0xb06bff : theme === 'arsenal' ? 0x7ed957 : 0x33d6ff;  // color neón por mapa
+  const accent2 = theme === 'frente' ? 0xffb37a : theme === 'duelo' ? 0xff8aa0 : theme === 'coliseo' ? 0xffe0a0 : theme === 'tormenta' ? 0xd6b3ff : theme === 'arsenal' ? 0xb6f09a : 0x6fe6ff;
+  const floorCol = theme === 'frente' ? 0x4a3a30 : theme === 'duelo' ? 0x33303c : theme === 'coliseo' ? 0x4a4030 : theme === 'tormenta' ? 0x2f3140 : theme === 'arsenal' ? 0x34392c : 0x394452;
 
   // ---- limpiar el mundo anterior (cambio de mapa) ----
   if (worldGroup) { scene.remove(worldGroup); disposeGroup(worldGroup); }
@@ -491,7 +494,7 @@ function buildWorld(map) {
   add(dust);
 
   // ---- muros perimetrales con franja luminosa ----
-  const wallMat = new THREE.MeshStandardMaterial({ color: theme === 'frente' ? 0x4a4038 : theme === 'duelo' ? 0x3a3340 : theme === 'coliseo' ? 0x5b5040 : theme === 'tormenta' ? 0x3c3b4a : 0x38424f, roughness: .85 });
+  const wallMat = new THREE.MeshStandardMaterial({ color: theme === 'frente' ? 0x4a4038 : theme === 'duelo' ? 0x3a3340 : theme === 'coliseo' ? 0x5b5040 : theme === 'tormenta' ? 0x3c3b4a : theme === 'arsenal' ? 0x46493a : 0x38424f, roughness: .85 });
   const h = 8, t = 2;
   for (const [wx, wz, ww, wd] of [[0, half, size, t], [0, -half, size, t], [half, 0, t, size], [-half, 0, t, size]]) {
     addBox(wx, h / 2, wz, ww, h, wd, wallMat);
@@ -1690,12 +1693,13 @@ function setMode(m, byUser) {
   chosenMode = m;
   currentMode = m;
   if (byUser) modePicked = true;
-  const ffa = D('mode-ffa'), team = D('mode-teams'), duel = D('mode-duel'), jug = D('mode-jugg'), br = D('mode-br');
+  const ffa = D('mode-ffa'), team = D('mode-teams'), duel = D('mode-duel'), jug = D('mode-jugg'), br = D('mode-br'), gg = D('mode-gg');
   if (ffa) ffa.classList.toggle('selected', m === 'ffa');
   if (team) team.classList.toggle('selected', m === 'teams');
   if (duel) duel.classList.toggle('selected', m === 'duel');
   if (jug) jug.classList.toggle('selected', m === 'juggernaut');
   if (br) br.classList.toggle('selected', m === 'br');
+  if (gg) gg.classList.toggle('selected', m === 'gungame');
 }
 
 // Marcador por equipos (arriba) — solo visible en modo equipos
@@ -1805,6 +1809,29 @@ function updateBRUI(s) {
     Sub.textContent = 'La partida empieza cuando entre al menos un jugador';
     brBtn(false); ov.classList.remove('hidden');
   } else ov.classList.add('hidden');
+}
+
+// Interfaz del Gun Game (nivel/arma + escalera de progreso + fin de ronda)
+function updateGGUI(s) {
+  const hud = D('gg-hud'), ov = D('gg-overlay');
+  if (!hud || !ov) return;
+  if (s.mode !== 'gungame' || !s.gg) { hud.classList.add('hidden'); ov.classList.add('hidden'); return; }
+  const g = s.gg;
+  const me = s.players.find(p => p.id === selfId);
+  const lvl = me ? (me.ggLevel || 0) : 0;
+  if (g.state === 'playing') {
+    hud.classList.remove('hidden'); ov.classList.add('hidden');
+    const wpn = g.ladder[Math.min(lvl, g.ladder.length - 1)];
+    D('gg-level').innerHTML = `🔫 Nivel <b>${lvl + 1}</b>/${g.total} · ${weapons[wpn] ? esc(weapons[wpn].name) : wpn}`;
+    let pips = '';
+    for (let i = 0; i < g.total; i++) pips += `<span class="${i < lvl ? 'done' : i === lvl ? 'cur' : ''}"></span>`;
+    D('gg-pips').innerHTML = pips;
+  } else {
+    hud.classList.add('hidden'); ov.classList.remove('hidden');
+    const iWon = g.winnerId === selfId;
+    const t = D('gg-ov-title'); t.textContent = iWon ? '🏆 ¡GANASTE LA RONDA!' : `🏆 Ganó ${esc(g.winnerName || '—')}`; t.className = iWon ? 'win' : '';
+    D('gg-ov-sub').textContent = `Completó la escalera de armas · nueva ronda en ${Math.max(0, Math.ceil((g.countdown || 0) / 1000))}s`;
+  }
 }
 
 function showToast(msg) {
@@ -2131,7 +2158,8 @@ function animate() {
   const duelFrozen = latest.mode === 'duel' && latest.duel && latest.duel.state !== 'playing';
   const juggFrozen = latest.mode === 'juggernaut' && latest.jugg && latest.jugg.state !== 'fighting';
   const brFrozen = latest.mode === 'br' && latest.br && latest.br.state !== 'playing';
-  inputOn = joined && selfAlive && !duelFrozen && !juggFrozen && !brFrozen && (pointerLocked || ((isMobile || usingGamepad) && !menuOpen));
+  const ggFrozen = latest.mode === 'gungame' && latest.gg && latest.gg.state !== 'playing';
+  inputOn = joined && selfAlive && !duelFrozen && !juggFrozen && !brFrozen && !ggFrozen && (pointerLocked || ((isMobile || usingGamepad) && !menuOpen));
   pollGamepad(dt);                                                            // leer el control (usa el inputOn recién calculado)
 
   // métricas de rendimiento (FPS/ping) y marcador en vivo
@@ -2279,12 +2307,13 @@ function animate() {
   });
 
   // selector de modo de juego
-  const mffa = D('mode-ffa'), mteam = D('mode-teams'), mduel = D('mode-duel'), mjug = D('mode-jugg'), mbr = D('mode-br');
+  const mffa = D('mode-ffa'), mteam = D('mode-teams'), mduel = D('mode-duel'), mjug = D('mode-jugg'), mbr = D('mode-br'), mgg = D('mode-gg');
   if (mffa) mffa.onclick = () => { sfx.init(); sfx.playLocal('ui', 0.4); setMode('ffa', true); };
   if (mteam) mteam.onclick = () => { sfx.init(); sfx.playLocal('ui', 0.4); setMode('teams', true); };
   if (mduel) mduel.onclick = () => { sfx.init(); sfx.playLocal('ui', 0.4); setMode('duel', true); };
   if (mjug) mjug.onclick = () => { sfx.init(); sfx.playLocal('ui', 0.4); setMode('juggernaut', true); };
   if (mbr) mbr.onclick = () => { sfx.init(); sfx.playLocal('ui', 0.4); setMode('br', true); };
+  if (mgg) mgg.onclick = () => { sfx.init(); sfx.playLocal('ui', 0.4); setMode('gungame', true); };
   setMode('ffa'); // por defecto
 
   D('play-btn').onclick = () => {
