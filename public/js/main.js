@@ -735,34 +735,57 @@ function limb(parent, px, py, pz, mesh, hang) {
 function makePlayerMesh(color) {
   const g = new THREE.Group();
   const HD = !isMobile;                            // detalle extra solo en PC (móvil: modelo liviano)
-  const suit = new THREE.MeshStandardMaterial({ color, roughness: .55, metalness: .15 });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x1b2330, roughness: .6 });
-  const skin = new THREE.MeshStandardMaterial({ color: 0xe0a98a, roughness: .7 });
-  const visorMat = new THREE.MeshStandardMaterial({ color: 0x0c1016, roughness: .25, metalness: .6, emissive: 0x37a6ff, emissiveIntensity: .95 });
+  const suit = new THREE.MeshStandardMaterial({ color, roughness: .5, metalness: .25 });               // armadura (color del jugador)
+  const plate = new THREE.MeshStandardMaterial({ color: 0x2b323e, roughness: .45, metalness: .55 });   // placas oscuras
+  const dark = new THREE.MeshStandardMaterial({ color: 0x12161d, roughness: .6, metalness: .3 });       // articulaciones/undersuit
+  const glow = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: .95, roughness: .4 }); // acentos neón
+  const visorMat = new THREE.MeshStandardMaterial({ color: 0x080b10, roughness: .15, metalness: .7, emissive: color, emissiveIntensity: 1.0 });
 
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.36, 0.6, 4, 12), suit);
-  torso.position.y = 1.28; torso.castShadow = true; g.add(torso);
-  const chest = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.32, 0.12),
-    new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: .3 }));
-  chest.position.set(0, 1.35, -0.3); g.add(chest);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 16), skin);
-  head.position.y = 1.95; head.castShadow = true; g.add(head);
-  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.31, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2), dark);
-  helmet.position.y = 1.97; g.add(helmet);
-  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.1, 0.06), visorMat);
-  visor.position.set(0, 1.95, -0.25); g.add(visor);
-  const bp = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.42, 0.18), dark);
-  bp.position.set(0, 1.32, 0.3); g.add(bp);
-  const armL = limb(g, 0.42, 1.52, 0, new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.5, 4, 8), suit), -0.35);
-  const armR = limb(g, -0.42, 1.52, 0, new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.5, 4, 8), suit), -0.35);
-  const legL = limb(g, 0.16, 0.92, 0, new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.55, 4, 8), dark), -0.42);
-  const legR = limb(g, -0.16, 0.92, 0, new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.55, 4, 8), dark), -0.42);
-  if (HD) {                                        // guantes, botas, hombreras, cinturón y emblema (PC)
-    for (const arm of [armL, armR]) { const hnd = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.14, 0.18), dark); hnd.position.y = -0.62; arm.add(hnd); }
-    for (const leg of [legL, legR]) { const bt = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.13, 0.3), dark); bt.position.set(0, -0.72, -0.05); leg.add(bt); }
-    for (const sx of [-1, 1]) { const sp = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.32), suit); sp.position.set(sx * 0.42, 1.6, 0); sp.rotation.z = sx * 0.22; sp.castShadow = true; g.add(sp); }
-    const belt = new THREE.Mesh(new THREE.BoxGeometry(0.74, 0.1, 0.5), dark); belt.position.y = 1.02; g.add(belt);
-    const emblem = new THREE.Mesh(new THREE.CircleGeometry(0.075, 16), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: .8 })); emblem.position.set(0, 1.4, -0.37); g.add(emblem);
+  // --- torso: cuerpo + peto + abdomen + núcleo luminoso ---
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 0.55, 5, 14), suit);
+  torso.position.y = 1.3; torso.castShadow = true; g.add(torso);
+  const chest = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.42, 0.24), plate);
+  chest.position.set(0, 1.42, -0.16); chest.castShadow = true; g.add(chest);
+  const abdo = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.28, 0.22), dark);
+  abdo.position.set(0, 1.08, -0.05); g.add(abdo);
+  const core = new THREE.Mesh(new THREE.CircleGeometry(0.07, 18), glow);
+  core.rotation.y = Math.PI; core.position.set(0, 1.46, -0.29); g.add(core);
+
+  // --- cuello + casco cerrado con visera luminosa ---
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.12, 10), dark);
+  neck.position.y = 1.66; g.add(neck);
+  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.27, 18, 16), plate);
+  helmet.position.y = 1.9; helmet.scale.set(1, 1.06, 1.04); helmet.castShadow = true; g.add(helmet);
+  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.33, 0.085, 0.1), visorMat);
+  visor.position.set(0, 1.91, -0.2); g.add(visor);
+
+  // --- mochila ---
+  const bp = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.46, 0.2), plate);
+  bp.position.set(0, 1.34, 0.27); bp.castShadow = true; g.add(bp);
+
+  // --- brazos y piernas (pivotes para animar) ---
+  const armL = limb(g, 0.42, 1.54, 0, new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.52, 4, 8), suit), -0.34);
+  const armR = limb(g, -0.42, 1.54, 0, new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.52, 4, 8), suit), -0.34);
+  const legL = limb(g, 0.15, 0.94, 0, new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.56, 4, 8), plate), -0.42);
+  const legR = limb(g, -0.15, 0.94, 0, new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.56, 4, 8), plate), -0.42);
+
+  if (HD) {                                        // detalle de PC: hombreras, guantes, botas, rodilleras, franjas neón
+    const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.13, 0.26), dark); jaw.position.set(0, 1.77, -0.04); g.add(jaw);
+    const crest = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.09, 0.26), glow); crest.position.set(0, 2.04, 0.02); g.add(crest);
+    for (const sx of [-1, 1]) {                    // franjas del pecho + ventilas de la mochila
+      const cs = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.32, 0.04), glow); cs.position.set(sx * 0.18, 1.42, -0.27); g.add(cs);
+      const bv = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.3, 0.05), glow); bv.position.set(sx * 0.1, 1.34, 0.38); g.add(bv);
+      const sp = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.62), plate);
+      sp.position.set(sx * 0.42, 1.64, 0); sp.castShadow = true; g.add(sp);
+      const tr = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.022, 6, 16), glow);
+      tr.rotation.x = Math.PI / 2; tr.position.set(sx * 0.42, 1.58, 0); g.add(tr);
+    }
+    for (const arm of [armL, armR]) { const hnd = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.14, 0.18), dark); hnd.position.y = -0.62; arm.add(hnd); }
+    for (const leg of [legL, legR]) {
+      const bt = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.14, 0.32), dark); bt.position.set(0, -0.72, -0.05); leg.add(bt);
+      const kn = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.12, 0.09), glow); kn.position.set(0, -0.22, -0.13); leg.add(kn);
+    }
+    const belt = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.1, 0.46), dark); belt.position.y = 0.98; g.add(belt);
   }
   g.userData.walk = { armL, armR, legL, legR };
   g.userData.bodyMat = suit; // para flash de impacto
