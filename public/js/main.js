@@ -79,7 +79,7 @@ const _mv = new THREE.Vector3();
 const effectLights = [];
 let lightIdx = 0;
 let jumpPads = [], dust = null, powerMesh = null;
-let worldGroup = null, builtTheme = null;              // para reconstruir el mundo al cambiar de mapa
+let worldGroup = null, builtTheme = null, builtSize = 0; // para reconstruir el mundo al cambiar de mapa o tamaño
 let stormMesh = null;                                  // muro de la tormenta (Battle Royale)
 const padRings = [];                                   // anillos ascendentes de los jump pads
 let AMMO_CRATES = [{ x: 27, z: 27 }, { x: -27, z: -27 }]; // cajas de munición (las define el mapa)
@@ -117,8 +117,8 @@ socket.on('init', (data) => {
   brEliminated = false; brPlace = 0;
   local.x = data.spawn.x; local.z = data.spawn.z; local.feetY = 0;
   setWeapon(data.weapon, true);
-  if (!worldBuilt) { initThree(); buildWorld(data.map); worldBuilt = true; builtTheme = data.map.theme; }
-  else if (data.map.theme !== builtTheme) { buildWorld(data.map); builtTheme = data.map.theme; } // cambió el mapa
+  if (!worldBuilt) { initThree(); buildWorld(data.map); worldBuilt = true; builtTheme = data.map.theme; builtSize = data.map.size; }
+  else if (data.map.theme !== builtTheme || data.map.size !== builtSize) { buildWorld(data.map); builtTheme = data.map.theme; builtSize = data.map.size; } // cambió el mapa o su tamaño
   joined = true;
   D('menu').classList.add('hidden');
   D('crosshair').classList.remove('hidden');

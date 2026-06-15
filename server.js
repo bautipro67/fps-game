@@ -298,6 +298,30 @@ const MAPS = {
     ammocrates: [],
   },
 };
+// Agranda los mapas chicos y separa más los spawns (escala posiciones y huella; la altura no). BR ya es enorme.
+function scaleMap(m, S) {
+  const so = (o) => ({ ...o, x: o.x * S, z: o.z * S, w: o.w * S, d: o.d * S });  // obstáculo
+  const sp = (o) => ({ ...o, x: o.x * S, z: o.z * S });                          // punto (spawn/pickup/etc.)
+  const obst = m.obstacles.map(so);
+  return {
+    ...m, half: Math.round((m.half || 50) * S),
+    obstacles: obst, aabbs: buildAABBs(obst),
+    spawns: m.spawns.map(sp),
+    spawnsA: m.spawnsA && m.spawnsA.map(sp),
+    spawnsB: m.spawnsB && m.spawnsB.map(sp),
+    jumppads: (m.jumppads || []).map(sp),
+    powerPos: { ...m.powerPos, x: m.powerPos.x * S, z: m.powerPos.z * S },
+    pickupSpawns: m.pickupSpawns.map(sp),
+    medkitSpawns: m.medkitSpawns.map(sp),
+    ammocrates: (m.ammocrates || []).map(sp),
+  };
+}
+MAPS.ffa = scaleMap(MAPS.ffa, 1.5);
+MAPS.teams = scaleMap(MAPS.teams, 1.5);
+MAPS.juggernaut = scaleMap(MAPS.juggernaut, 1.5);
+MAPS.gungame = scaleMap(MAPS.gungame, 1.5);
+MAPS.duel = scaleMap(MAPS.duel, 1.3);
+
 const DUEL_ROUNDS = 5;
 const DUEL_ROUND_GAP = 3500;    // pausa entre rondas
 const DUEL_END_GAP = 6000;      // mostrar resultado antes de volver al lobby
@@ -801,7 +825,7 @@ function updateGame(g, dt) {
 }
 
 // --------------------------- Modo Duelo (1 vs 1) ----------------------------
-function duelSpawn(side) { return side === 'A' ? DUEL_SPAWN_A : DUEL_SPAWN_B; }
+function duelSpawn(g, side) { const sp = g.map.spawns; return side === 'A' ? sp[0] : sp[1]; } // usa el mapa (ya escalado)
 
 function startDuelMatch(g) {
   const ps = playersIn(g);
@@ -815,7 +839,7 @@ function startDuelRound(g) {
   g.round++;
   g.duelState = 'playing';
   for (const p of playersIn(g)) {
-    const s = duelSpawn(g.sides[p.id] || 'A');
+    const s = duelSpawn(g, g.sides[p.id] || 'A');
     p.x = s.x; p.z = s.z; p.y = 0; p.health = PLAYER_HP; p.alive = true;
     p.weapon = p.startWeapon; p.lastHurtBy = null;
     p.invulnUntil = Date.now() + DUEL_ROUND_INVULN;
