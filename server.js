@@ -281,7 +281,7 @@ const MAPS = {
     ammocrates: [{ x: 36, z: 36 }, { x: -36, z: -36 }],
   },
   br: {
-    theme: 'tormenta', half: BR_HALF,
+    theme: 'tormenta', half: BR_HALF, storm: true,
     obstacles: OBST_BR, aabbs: buildAABBs(OBST_BR), spawns: SPAWNS_BR,
     jumppads: [], powerPos: { x: 0, z: 0, minY: 999 }, // sin power-up
     pickupSpawns: PICKUPS_BR,
@@ -316,11 +316,113 @@ function scaleMap(m, S) {
     ammocrates: (m.ammocrates || []).map(sp),
   };
 }
-MAPS.ffa = scaleMap(MAPS.ffa, 1.5);
-MAPS.teams = scaleMap(MAPS.teams, 1.5);
-MAPS.juggernaut = scaleMap(MAPS.juggernaut, 1.5);
-MAPS.gungame = scaleMap(MAPS.gungame, 1.5);
-MAPS.duel = scaleMap(MAPS.duel, 1.3);
+// ===================== POOL DE MAPAS (biomas + layouts) =====================
+// Coloca spawns (anillo de borde) e ítems en posiciones DESPEJADAS (validez garantizada por construcción).
+function clearObst(obst, x, z, r) { return !obst.some(o => x > o.x - o.w / 2 - r && x < o.x + o.w / 2 + r && z > o.z - o.d / 2 - r && z < o.z + o.d / 2 + r); }
+function autoArena(obst, theme, opts = {}) {
+  const spawns = [];
+  for (let i = 0; i < 14; i++) { const a = i / 14 * Math.PI * 2; for (let r = 45; r >= 28; r -= 3) { const x = Math.round(Math.cos(a) * r), z = Math.round(Math.sin(a) * r); if (clearObst(obst, x, z, 1.3)) { spawns.push({ x, z }); break; } } }
+  const spread = (count, minR, maxR, r) => {
+    const out = [];
+    for (let t = 0; t < 260 && out.length < count; t++) {
+      const a = Math.random() * Math.PI * 2, rad = minR + Math.random() * (maxR - minR), x = Math.round(Math.cos(a) * rad), z = Math.round(Math.sin(a) * rad);
+      if (clearObst(obst, x, z, r) && (!opts.openCenter || Math.hypot(x, z) > 11) && out.every(p => Math.hypot(p.x - x, p.z - z) > 8)) out.push({ x, z });
+    }
+    return out;
+  };
+  const weps = ['sniper', 'rocket', 'shotgun', 'smg', 'rifle', 'knife'];
+  const pickups = opts.noPickups ? [] : spread(6, 13, 38, 1.5).map((p, i) => ({ id: 'p' + i, x: p.x, z: p.z, weapon: weps[i % weps.length] }));
+  const medkits = spread(4, 11, 30, 1.2).map((p, i) => ({ id: 'm' + i, x: p.x, z: p.z }));
+  const jumps = spread(4, 9, 26, 1.2);
+  return { theme, obstacles: obst, spawns, jumppads: jumps, powerPos: { x: 0, z: 0, minY: opts.noPickups ? 999 : 5.4 }, pickupSpawns: pickups, medkitSpawns: medkits, ammocrates: [] };
+}
+// Variante simétrica (equipos/duelo): ítems espejados para que sea justo.
+function symItems(obst, count, minR, maxR, r) {
+  const out = [];
+  for (let t = 0; t < 320 && out.length < count * 2; t++) {
+    const x = Math.round((Math.random() * 2 - 1) * maxR), z = Math.round(minR + Math.random() * (maxR - minR)), d = Math.hypot(x, z);
+    if (d < minR || d > maxR) continue;
+    if (clearObst(obst, x, z, r) && clearObst(obst, -x, -z, r) && out.every(p => Math.hypot(p.x - x, p.z - z) > 9)) { out.push({ x, z }); out.push({ x: -x, z: -z }); }
+  }
+  return out;
+}
+function teamsMap(obst, theme) {
+  const weps = ['rocket', 'sniper', 'shotgun', 'smg'];
+  const pk = symItems(obst, 3, 9, 30, 1.5).map((p, i) => ({ id: 'p' + i, x: p.x, z: p.z, weapon: weps[(i >> 1) % weps.length] }));
+  const mk = symItems(obst, 2, 7, 26, 1.2).map((p, i) => ({ id: 'm' + i, x: p.x, z: p.z }));
+  return { theme, obstacles: obst, spawns: [...SPAWNS_TEAMS_A, ...SPAWNS_TEAMS_B], spawnsA: SPAWNS_TEAMS_A, spawnsB: SPAWNS_TEAMS_B, jumppads: [{ x: 10, z: 0 }, { x: -10, z: 0 }, { x: 0, z: 12 }, { x: 0, z: -12 }], powerPos: { x: 0, z: 0, minY: 5.4 }, pickupSpawns: pk, medkitSpawns: mk, ammocrates: [{ x: 24, z: 8 }, { x: -24, z: -8 }] };
+}
+function duelMap(obst, theme) {
+  const pk = symItems(obst, 2, 6, 22, 1.5).map((p, i) => ({ id: 'p' + i, x: p.x, z: p.z, weapon: ['rocket', 'sniper', 'shotgun', 'smg'][(i >> 1) % 4] }));
+  const mk = symItems(obst, 1, 5, 15, 1.2).map((p, i) => ({ id: 'm' + i, x: p.x, z: p.z }));
+  return { theme, obstacles: obst, spawns: [DUEL_SPAWN_A, DUEL_SPAWN_B], jumppads: [], powerPos: { x: 0, z: 0, minY: 999 }, pickupSpawns: pk, medkitSpawns: mk, ammocrates: [{ x: -18, z: 0 }, { x: 18, z: 0 }] };
+}
+// --- Layouts distintos (cada uno con identidad propia) ---
+const L_FORT = [ // FORTALEZA: muralla central con aberturas + cobertura exterior
+  { x: -9, z: -10, w: 8, d: 2, h: 4.5 }, { x: 9, z: -10, w: 8, d: 2, h: 4.5 }, { x: -9, z: 10, w: 8, d: 2, h: 4.5 }, { x: 9, z: 10, w: 8, d: 2, h: 4.5 },
+  { x: -10, z: -9, w: 2, d: 8, h: 4.5 }, { x: -10, z: 9, w: 2, d: 8, h: 4.5 }, { x: 10, z: -9, w: 2, d: 8, h: 4.5 }, { x: 10, z: 9, w: 2, d: 8, h: 4.5 },
+  { x: 0, z: 0, w: 4, d: 4, h: 5.5 },
+  { x: 30, z: 0, w: 2, d: 14, h: 4 }, { x: -30, z: 0, w: 2, d: 14, h: 4 }, { x: 0, z: 30, w: 14, d: 2, h: 4 }, { x: 0, z: -30, w: 14, d: 2, h: 4 },
+  { x: 28, z: 28, w: 5, d: 5, h: 4 }, { x: -28, z: 28, w: 5, d: 5, h: 4 }, { x: 28, z: -28, w: 5, d: 5, h: 4 }, { x: -28, z: -28, w: 5, d: 5, h: 4 },
+];
+const L_PILL = [ // PILARES: columnas dispersas, centro abierto
+  { x: 13, z: 13, w: 3, d: 3, h: 5.5 }, { x: -13, z: 13, w: 3, d: 3, h: 5.5 }, { x: 13, z: -13, w: 3, d: 3, h: 5.5 }, { x: -13, z: -13, w: 3, d: 3, h: 5.5 },
+  { x: 25, z: 0, w: 3, d: 3, h: 5 }, { x: -25, z: 0, w: 3, d: 3, h: 5 }, { x: 0, z: 25, w: 3, d: 3, h: 5 }, { x: 0, z: -25, w: 3, d: 3, h: 5 },
+  { x: 26, z: 26, w: 3.5, d: 3.5, h: 4.5 }, { x: -26, z: 26, w: 3.5, d: 3.5, h: 4.5 }, { x: 26, z: -26, w: 3.5, d: 3.5, h: 4.5 }, { x: -26, z: -26, w: 3.5, d: 3.5, h: 4.5 },
+  { x: 36, z: 14, w: 2.5, d: 2.5, h: 4 }, { x: -36, z: 14, w: 2.5, d: 2.5, h: 4 }, { x: 36, z: -14, w: 2.5, d: 2.5, h: 4 }, { x: -36, z: -14, w: 2.5, d: 2.5, h: 4 },
+  { x: 14, z: 36, w: 2.5, d: 2.5, h: 4 }, { x: -14, z: 36, w: 2.5, d: 2.5, h: 4 }, { x: 14, z: -36, w: 2.5, d: 2.5, h: 4 }, { x: -14, z: -36, w: 2.5, d: 2.5, h: 4 },
+];
+const L_TREN = [ // TRINCHERAS: rejilla de muros largos formando pasillos
+  { x: -16, z: 0, w: 2, d: 30, h: 3.5 }, { x: 16, z: 0, w: 2, d: 30, h: 3.5 }, { x: 0, z: -16, w: 30, d: 2, h: 3.5 }, { x: 0, z: 16, w: 30, d: 2, h: 3.5 },
+  { x: 0, z: 0, w: 5, d: 5, h: 4 },
+  { x: 32, z: 16, w: 6, d: 2, h: 3 }, { x: -32, z: 16, w: 6, d: 2, h: 3 }, { x: 32, z: -16, w: 6, d: 2, h: 3 }, { x: -32, z: -16, w: 6, d: 2, h: 3 },
+  { x: 16, z: 32, w: 2, d: 6, h: 3 }, { x: -16, z: 32, w: 2, d: 6, h: 3 }, { x: 16, z: -32, w: 2, d: 6, h: 3 }, { x: -16, z: -32, w: 2, d: 6, h: 3 },
+  { x: 28, z: 0, w: 2, d: 8, h: 3 }, { x: -28, z: 0, w: 2, d: 8, h: 3 }, { x: 0, z: 28, w: 8, d: 2, h: 3 }, { x: 0, z: -28, w: 8, d: 2, h: 3 },
+];
+const L_OPEN = [ // ABIERTA: bloques sueltos, centro despejado (apta para Juggernaut)
+  { x: 18, z: 6, w: 5, d: 5, h: 4 }, { x: -18, z: 6, w: 5, d: 5, h: 4 }, { x: 18, z: -6, w: 5, d: 5, h: 4 }, { x: -18, z: -6, w: 5, d: 5, h: 4 },
+  { x: 6, z: 18, w: 5, d: 5, h: 4 }, { x: -6, z: 18, w: 5, d: 5, h: 4 }, { x: 6, z: -18, w: 5, d: 5, h: 4 }, { x: -6, z: -18, w: 5, d: 5, h: 4 },
+  { x: 32, z: 0, w: 3, d: 10, h: 3.5 }, { x: -32, z: 0, w: 3, d: 10, h: 3.5 }, { x: 0, z: 32, w: 10, d: 3, h: 3.5 }, { x: 0, z: -32, w: 10, d: 3, h: 3.5 },
+  { x: 30, z: 30, w: 4, d: 4, h: 4 }, { x: -30, z: 30, w: 4, d: 4, h: 4 }, { x: 30, z: -30, w: 4, d: 4, h: 4 }, { x: -30, z: -30, w: 4, d: 4, h: 4 },
+];
+const T_NEW = [ // EQUIPOS: flancos verticales + frentes de base (simétrico 180°)
+  { x: 0, z: 0, w: 6, d: 6, h: 5 },
+  { x: 16, z: 0, w: 3, d: 12, h: 4 }, { x: -16, z: 0, w: 3, d: 12, h: 4 },
+  { x: 0, z: 26, w: 18, d: 2, h: 4 }, { x: 0, z: -26, w: 18, d: 2, h: 4 },
+  { x: 12, z: 16, w: 5, d: 5, h: 3.5 }, { x: -12, z: 16, w: 5, d: 5, h: 3.5 }, { x: 12, z: -16, w: 5, d: 5, h: 3.5 }, { x: -12, z: -16, w: 5, d: 5, h: 3.5 },
+  { x: 30, z: 12, w: 2, d: 8, h: 3.5 }, { x: -30, z: 12, w: 2, d: 8, h: 3.5 }, { x: 30, z: -12, w: 2, d: 8, h: 3.5 }, { x: -30, z: -12, w: 2, d: 8, h: 3.5 },
+];
+const D_ALT = [ // DUELO: cobertura rotacional (simétrico 180°)
+  { x: 0, z: 0, w: 4, d: 4, h: 4 },
+  { x: 11, z: 7, w: 7, d: 2, h: 3 }, { x: -11, z: -7, w: 7, d: 2, h: 3 }, { x: 9, z: -11, w: 2, d: 7, h: 3 }, { x: -9, z: 11, w: 2, d: 7, h: 3 },
+  { x: 0, z: 20, w: 10, d: 2, h: 3 }, { x: 0, z: -20, w: 10, d: 2, h: 3 }, { x: 22, z: 4, w: 2, d: 12, h: 3.5 }, { x: -22, z: -4, w: 2, d: 12, h: 3.5 },
+];
+const reskin = (base, theme) => ({ ...base, theme });   // mismo layout, otro bioma
+const roundm = (m) => ({ ...m, round: true });          // terreno circular/ovalado (recorte radial)
+const flatm = (m) => ({ ...m, decor: 'flat' });         // terreno llano: decoración mínima y despejada
+// Cada modo: variantes con LAYOUTS, FORMAS (cuadrado/redondo) y DECORACIÓN distintas. Rotan partida a partida.
+const POOL_BASE = {
+  ffa: [MAPS.ffa, autoArena(L_FORT, 'desierto'), roundm(autoArena(L_PILL, 'nieve')), autoArena(L_TREN, 'lava')],
+  teams: [MAPS.teams, teamsMap(T_NEW, 'ciudad'), flatm(reskin(MAPS.teams, 'nieve'))],
+  duel: [MAPS.duel, duelMap(D_ALT, 'lava'), roundm(reskin(MAPS.duel, 'selva'))],
+  juggernaut: [MAPS.juggernaut, roundm(autoArena(L_PILL, 'desierto', { openCenter: true })), autoArena(L_OPEN, 'selva', { openCenter: true })],
+  br: [MAPS.br, reskin(MAPS.br, 'nieve'), flatm(reskin(MAPS.br, 'ciudad'))],
+  gungame: [MAPS.gungame, autoArena(L_TREN, 'ciudad', { noPickups: true }), roundm(autoArena(L_FORT, 'desierto', { noPickups: true }))],
+};
+const MAP_SCALE = { ffa: 1.5, teams: 1.5, juggernaut: 1.5, gungame: 1.5, duel: 1.3, br: 1 };
+const MAP_POOL = {};
+for (const mode in POOL_BASE) MAP_POOL[mode] = POOL_BASE[mode].map((m, i) => ({ ...scaleMap(m, MAP_SCALE[mode]), id: mode + '_' + i }));
+function pickMap(mode) { const pool = MAP_POOL[mode] || [scaleMap(MAPS[mode], 1)]; return pool[Math.floor(Math.random() * pool.length)]; }
+function mapPayload(m) { return { size: (m.half || 50) * 2, half: m.half || 50, obstacles: m.obstacles, eye: EYE, jumppads: m.jumppads, ammocrates: m.ammocrates, theme: m.theme, id: m.id, storm: !!m.storm, round: !!m.round, decor: m.decor || null }; }
+// Cambia el mapa de una partida y avisa a los clientes para que reconstruyan el mundo
+function setGameMap(g, m) {
+  g.map = m;
+  g.pickups = m.pickupSpawns.map(p => ({ ...p, active: true, respawnAt: 0 }));
+  g.medkits = m.medkitSpawns.map(k => ({ ...k, active: true, respawnAt: 0 }));
+  g.drops = [];
+  io.to(g.mode).emit('mapChange', mapPayload(m));
+}
+function rotateMap(g) { setGameMap(g, pickMap(g.mode)); }
 
 const DUEL_ROUNDS = 5;
 const DUEL_ROUND_GAP = 3500;    // pausa entre rondas
@@ -387,6 +489,12 @@ function pointClear(obst, x, z, r, bound = 49) {
   return true;
 }
 const mapBound = (map) => (map.half || 50) - 1;   // límite jugable del mapa (±)
+// Recorta una posición al mapa: círculo (mapas redondos) o cuadrado.
+function clampPos(map, x, z) {
+  const lim = mapBound(map);
+  if (map.round) { const d = Math.hypot(x, z); if (d > lim) { x = x / d * lim; z = z / d * lim; } return { x, z }; }
+  return { x: clamp(x, -lim, lim), z: clamp(z, -lim, lim) };
+}
 // Rumbo para esquivar: si el camino recto está libre, va recto; si no, rodea el
 // obstáculo SIEMPRE por el mismo lado (seguimiento de pared) en vez de zigzaguear.
 function avoidDir(map, b, dx, dz) {
@@ -469,7 +577,7 @@ function clearTeams(g) {
 function sameTeam(g, t1, t2) { return g.mode === 'teams' && t1 && t1 === t2; }
 
 function createGame(mode) {
-  const map = MAPS[mode];
+  const map = pickMap(mode);
   const g = {
     mode, map, bots: [],
     pickups: map.pickupSpawns.map(p => ({ ...p, active: true, respawnAt: 0 })),
@@ -499,7 +607,7 @@ function adjustBots(g) {
   if (g.mode === 'teams') g.bots.forEach((b, idx) => { b.team = idx % 2 === 0 ? 'A' : 'B'; });
 }
 function createDuelGame() {
-  const map = MAPS.duel;
+  const map = pickMap('duel');
   return {
     mode: 'duel', map, bots: [],
     pickups: map.pickupSpawns.map(p => ({ ...p, active: true, respawnAt: 0 })),
@@ -518,7 +626,7 @@ function createJuggGame() {
   return g;
 }
 function createBRGame() {
-  const map = MAPS.br;
+  const map = pickMap('br');
   return {
     mode: 'br', map, bots: [],
     pickups: map.pickupSpawns.map(p => ({ ...p, active: true, respawnAt: 0 })),
@@ -758,8 +866,8 @@ function updateBots(g, dt) {
       const a = avoidDir(g.map, b, mvx, mvz);                 // rodea sin zigzag (mantiene el lado)
       const sp = BOT_SPEED * dt;
       const res = resolve(g.map.obstacles, b.x + a.x * sp, b.z + a.z * sp, 0.6);
-      const lim = mapBound(g.map);
-      const nx = clamp(res.x, -lim, lim), nz = clamp(res.z, -lim, lim);
+      const c = clampPos(g.map, res.x, res.z);
+      const nx = c.x, nz = c.z;
       const moved = Math.hypot(nx - b.x, nz - b.z);
       b.x = nx; b.z = nz;
       if (facing !== null) b.ry = facing;                              // en combate: mira al enemigo
@@ -782,6 +890,7 @@ function endMatch(g) {
   setTimeout(() => resetMatch(g), 12000);
 }
 function resetMatch(g) {
+  rotateMap(g);                                    // nueva partida → nuevo mapa/bioma
   for (const p of playersIn(g)) { p.score = 0; p.deaths = 0; p.kills = 0; p.streak = 0; p.boostUntil = 0; respawnPlayer(g, p); }
   for (const b of g.bots) { const s = spawnPoint(g, b.team); b.x = s.x; b.z = s.z; b.health = BOT_HP; b.alive = true; }
   g.drops = [];
@@ -830,6 +939,7 @@ function duelSpawn(g, side) { const sp = g.map.spawns; return side === 'A' ? sp[
 function startDuelMatch(g) {
   const ps = playersIn(g);
   if (ps.length < 2) { g.duelState = 'waiting'; return; }
+  rotateMap(g);                                    // nuevo duelo → nuevo mapa/bioma
   g.sides = {}; g.sides[ps[0].id] = 'A'; g.sides[ps[1].id] = 'B';
   for (const p of ps) { p.duelWins = 0; p.score = 0; p.kills = 0; p.deaths = 0; }
   g.round = 0; g.finalWinnerId = null;
@@ -940,6 +1050,7 @@ function pickGiant(g) {
 function startJuggRound(g) {
   const now = Date.now();
   g.round++;
+  if (g.round % 3 === 1) rotateMap(g);             // rota el mapa/bioma cada 3 rondas
   g.juggState = 'fighting';
   for (const p of playersIn(g)) p.isJugg = false;
   for (const b of g.bots) b.isJugg = false;
@@ -1035,8 +1146,7 @@ function updateJuggBots(g, dt) {
       const a = avoidDir(g.map, b, mvx, mvz);
       const sp = BOT_SPEED * (b.isJugg ? JUGG_SPEED_MULT : 1) * dt;
       const res = resolve(g.map.obstacles, b.x + a.x * sp, b.z + a.z * sp, b.isJugg ? 1.0 : 0.6);
-      const lim = mapBound(g.map);
-      b.x = clamp(res.x, -lim, lim); b.z = clamp(res.z, -lim, lim);
+      const c = clampPos(g.map, res.x, res.z); b.x = c.x; b.z = c.z;
       if (facing !== null) b.ry = facing; else b.ry = turnToward(b.ry, Math.atan2(a.x, a.z), 7 * dt);
     } else if (facing !== null) b.ry = facing;
   }
@@ -1105,6 +1215,7 @@ function stormRadius(g, now) {
 }
 function startBRMatch(g) {
   const now = Date.now();
+  rotateMap(g);                                          // nueva partida BR → nuevo mapa/bioma
   const ps = playersIn(g);
   g.bots = [];                                            // bots frescos para completar 20
   const need = Math.max(0, BR_TOTAL - ps.length);
@@ -1157,7 +1268,6 @@ function expelBRPlayers(g) {
 function updateBRBots(g, dt) {
   const now = Date.now();
   const ps = playersIn(g);
-  const lim = mapBound(g.map);
   const safe = g.stormR;
   for (const b of g.bots) {
     if (!b.alive) continue;                               // sin reaparición
@@ -1194,7 +1304,7 @@ function updateBRBots(g, dt) {
       const a = avoidDir(g.map, b, mvx, mvz);
       const sp = BOT_SPEED * dt;
       const res = resolve(g.map.obstacles, b.x + a.x * sp, b.z + a.z * sp, 0.6);
-      b.x = clamp(res.x, -lim, lim); b.z = clamp(res.z, -lim, lim);
+      const c = clampPos(g.map, res.x, res.z); b.x = c.x; b.z = c.z;
       if (facing !== null) b.ry = facing; else b.ry = turnToward(b.ry, Math.atan2(a.x, a.z), 7 * dt);
     } else if (facing !== null) b.ry = facing;
   }
@@ -1264,6 +1374,7 @@ function endGGRound(g, winner) {
   io.to('gungame').emit('announce', { text: `🏆 ¡${g.ggWinnerName} completó la escalera y gana la ronda!` });
 }
 function resetGGRound(g) {
+  rotateMap(g);                                    // nueva ronda de Gun Game → nuevo mapa/bioma
   for (const p of playersIn(g)) { p.ggLevel = 0; p.startWeapon = GG_LADDER[0]; respawnPlayer(g, p); }
   for (const b of g.bots) {
     b.ggLevel = 0; b.weapon = GG_LADDER[0];
@@ -1375,7 +1486,7 @@ io.on('connection', (socket) => {
     sendCounts();
     socket.emit('init', {
       selfId: socket.id,
-      map: { size: (g.map.half || 50) * 2, half: g.map.half || 50, obstacles: g.map.obstacles, eye: EYE, jumppads: g.map.jumppads, ammocrates: g.map.ammocrates, theme: g.map.theme },
+      map: mapPayload(g.map),
       weapons: WEAPONS, spawn: { x: p.x, y: p.y, z: p.z }, weapon: p.weapon, mode,
       timeLeft: Math.max(0, g.matchEnd - Date.now()), phase: g.phase,
     });
@@ -1386,7 +1497,12 @@ io.on('connection', (socket) => {
   socket.on('input', (d) => {
     const p = players.get(socket.id);
     if (!p || !p.alive || !d) return;
-    if (typeof d.x === 'number') { p.x = d.x; p.y = d.y; p.z = d.z; p.ry = d.ry; }
+    if (typeof d.x === 'number') {
+      p.y = d.y; p.ry = d.ry;
+      const g = gameOf(p);
+      if (g && g.map && g.map.round) { const c = clampPos(g.map, d.x, d.z); p.x = c.x; p.z = c.z; }
+      else { p.x = d.x; p.z = d.z; }
+    }
   });
 
   socket.on('shoot', (d) => {

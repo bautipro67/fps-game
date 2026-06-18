@@ -25,6 +25,8 @@ let weapons = {};            // config recibida del servidor
 let obstacles = [];          // para colisión en el cliente
 let EYE = 1.7;
 let mapHalf = 50;            // semieje del mapa actual (varía por modo; BR es más grande)
+let mapRound = false;        // forma del terreno: redondo/ovalado (recorte radial) vs cuadrado
+let mapDecor = null;         // estilo de decoración: 'flat' = llano/mínimo, null = completo
 
 let latest = { players: [], bots: [], pickups: [], medkits: [], drops: [], leaderId: null, power: { active: false }, timeLeft: 0, phase: 'playing' };
 let selfAlive = true;
@@ -79,7 +81,7 @@ const _mv = new THREE.Vector3();
 const effectLights = [];
 let lightIdx = 0;
 let jumpPads = [], dust = null, powerMesh = null;
-let worldGroup = null, builtTheme = null, builtSize = 0; // para reconstruir el mundo al cambiar de mapa o tamaño
+let worldGroup = null, builtTheme = null, builtSize = 0, builtMapId = null; // para reconstruir al cambiar de mapa/tamaño/variante
 let stormMesh = null;                                  // muro de la tormenta (Battle Royale)
 const padRings = [];                                   // anillos ascendentes de los jump pads
 let AMMO_CRATES = [{ x: 27, z: 27 }, { x: -27, z: -27 }]; // cajas de munición (las define el mapa)
@@ -88,6 +90,20 @@ let ammoCd = 0;
 let boostUntil = 0;                                    // mi power-up de daño x2
 let myTeam = null;                                     // 'A' | 'B' | null (FFA)
 let myJugg = false;                                    // ¿soy el gigante en Juggernaut?
+// Biomas: cada uno define color de acento, piso, muro, niebla [near,far,color], polvo y cielo (4 paradas)
+const BIOMES = {
+  arena:    { accent: 0x33d6ff, accent2: 0x6fe6ff, floor: 0x394452, wall: 0x38424f, fog: [80, 175, 0x9fc0d8], dust: 0xbcd6ee, sky: ['#0c1e33', '#2c5078', '#7e9fbb', '#aac4d6'] },
+  frente:   { accent: 0xff7a3c, accent2: 0xffb37a, floor: 0x4a3a30, wall: 0x4a4038, fog: [80, 175, 0xc9a98f], dust: 0xe8ccae, sky: ['#2a1810', '#5a3a22', '#a8754a', '#d8b48a'] },
+  duelo:    { accent: 0xff4d6d, accent2: 0xff8aa0, floor: 0x33303c, wall: 0x3a3340, fog: [70, 160, 0x6a5560], dust: 0xd0b0c0, sky: ['#1a0e18', '#3a2030', '#6a4055', '#a07088'] },
+  coliseo:  { accent: 0xffc24d, accent2: 0xffe0a0, floor: 0x4a4030, wall: 0x5b5040, fog: [80, 175, 0xd8c89f], dust: 0xe8dcb0, sky: ['#2a2008', '#5a4a1a', '#a8853a', '#d8c089'] },
+  tormenta: { accent: 0xb06bff, accent2: 0xd6b3ff, floor: 0x2f3140, wall: 0x3c3b4a, fog: [72, 165, 0x8a7fa0], dust: 0xc0b0d0, sky: ['#140a26', '#2c1c50', '#5a4a8a', '#8a7fb0'] },
+  arsenal:  { accent: 0x7ed957, accent2: 0xb6f09a, floor: 0x34392c, wall: 0x46493a, fog: [80, 175, 0xa8c89f], dust: 0xc8e0b0, sky: ['#1a2610', '#34501a', '#6a8a3a', '#a8c889'] },
+  desierto: { accent: 0xffb347, accent2: 0xffd98a, floor: 0x6b5a3a, wall: 0x7a6848, fog: [95, 210, 0xe8cfa0], dust: 0xe8d4a8, sky: ['#b87a3a', '#e0b86a', '#f0d9a8', '#ffeccb'] },
+  nieve:    { accent: 0x9fdfff, accent2: 0xd8f2ff, floor: 0x8a96a4, wall: 0x9aa6b4, fog: [60, 150, 0xdce8f0], dust: 0xffffff, sky: ['#4a6a88', '#8aa8c8', '#c8dcec', '#e8f2f8'] },
+  selva:    { accent: 0x6ee84d, accent2: 0xb0f090, floor: 0x33402a, wall: 0x3d4a30, fog: [55, 130, 0x6a8a5a], dust: 0xa8c898, sky: ['#1a3320', '#2c5040', '#5a7a5a', '#8aa888'] },
+  lava:     { accent: 0xff5a2a, accent2: 0xffa040, floor: 0x2a1d18, wall: 0x36241c, fog: [60, 150, 0x3a1810], dust: 0xd06030, sky: ['#1a0a06', '#401810', '#803020', '#c05030'] },
+  ciudad:   { accent: 0x33d6ff, accent2: 0x9b7bff, floor: 0x2a2e36, wall: 0x363b45, fog: [70, 165, 0x2a3340], dust: 0x8090a0, sky: ['#060a14', '#141d2e', '#283850', '#3a4a66'] },
+};
 let brEliminated = false, brPlace = 0;                 // Battle Royale: ¿me eliminaron? y en qué puesto
 const TEAM_COLOR = { A: 0x3b82f6, B: 0xe0483b };       // azul / rojo
 const ALLY = 0x39d98a, ENEMY = 0xff5a5a;               // verde aliado / rojo enemigo
@@ -117,8 +133,8 @@ socket.on('init', (data) => {
   brEliminated = false; brPlace = 0;
   local.x = data.spawn.x; local.z = data.spawn.z; local.feetY = 0;
   setWeapon(data.weapon, true);
-  if (!worldBuilt) { initThree(); buildWorld(data.map); worldBuilt = true; builtTheme = data.map.theme; builtSize = data.map.size; }
-  else if (data.map.theme !== builtTheme || data.map.size !== builtSize) { buildWorld(data.map); builtTheme = data.map.theme; builtSize = data.map.size; } // cambió el mapa o su tamaño
+  if (!worldBuilt) { initThree(); buildWorld(data.map); worldBuilt = true; builtTheme = data.map.theme; builtSize = data.map.size; builtMapId = data.map.id; }
+  else if (data.map.id !== builtMapId || data.map.theme !== builtTheme || data.map.size !== builtSize) { buildWorld(data.map); builtTheme = data.map.theme; builtSize = data.map.size; builtMapId = data.map.id; } // cambió el mapa/variante
   joined = true;
   D('menu').classList.add('hidden');
   D('crosshair').classList.remove('hidden');
@@ -126,6 +142,15 @@ socket.on('init', (data) => {
   if (isMobile) { D('touch-controls').classList.remove('hidden'); D('btn-menu').classList.remove('hidden'); }
   sfx.playLocal('spawn', 0.8);
   if (!animating) { clock = new THREE.Clock(); animate(); animating = true; }
+});
+
+// El mapa de la partida rotó (nuevo bioma/layout) → reconstruir el mundo
+socket.on('mapChange', (m) => {
+  if (!joined || !worldBuilt) return;
+  if (m.id === builtMapId) return;
+  mapHalf = m.half || 50;
+  buildWorld(m);
+  builtTheme = m.theme; builtSize = m.size; builtMapId = m.id;
 });
 
 socket.on('state', (s) => {
@@ -308,14 +333,15 @@ function onResize() {
 }
 
 // ----------------------------- Texturas procedurales ------------------------
-function makeGradientSky() {
+function makeGradientSky(sky) {
+  const S = sky || ['#0c1e33', '#2c5078', '#7e9fbb', '#aac4d6'];
   const cv = document.createElement('canvas'); cv.width = 1024; cv.height = 512;
   const x = cv.getContext('2d');
   const g = x.createLinearGradient(0, 0, 0, 512);
-  g.addColorStop(0.0, '#0c1e33');
-  g.addColorStop(0.42, '#2c5078');
-  g.addColorStop(0.5, '#7e9fbb'); // horizonte
-  g.addColorStop(1.0, '#aac4d6');
+  g.addColorStop(0.0, S[0]);
+  g.addColorStop(0.42, S[1]);
+  g.addColorStop(0.5, S[2]); // horizonte
+  g.addColorStop(1.0, S[3]);
   x.fillStyle = g; x.fillRect(0, 0, 1024, 512);
   // estrellas tenues en la parte alta
   for (let i = 0; i < 90; i++) {
@@ -345,9 +371,46 @@ function makeGradientSky() {
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
-function makeFloorTexture() {
+function makeFloorTexture(theme) {
+  const kind = biomeKind(theme);
   const cv = document.createElement('canvas'); cv.width = cv.height = 256;
   const x = cv.getContext('2d');
+  const t = new THREE.CanvasTexture(cv);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4;
+  if (kind === 'sand') {                                   // ARENA: dunas onduladas
+    x.fillStyle = '#caa970'; x.fillRect(0, 0, 256, 256);
+    x.strokeStyle = 'rgba(120,90,50,0.18)'; x.lineWidth = 3;
+    for (let yy = 14; yy < 256; yy += 24) { x.beginPath(); for (let xx = 0; xx <= 256; xx += 14) x.lineTo(xx, yy + Math.sin(xx * 0.06 + yy) * 7); x.stroke(); }
+    x.fillStyle = 'rgba(90,65,35,0.22)';
+    for (let i = 0; i < 170; i++) x.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
+    t.repeat.set(10, 10); return t;
+  }
+  if (kind === 'snow') {                                   // NIEVE: blanco con brillo
+    x.fillStyle = '#e9f1f6'; x.fillRect(0, 0, 256, 256);
+    x.fillStyle = 'rgba(150,180,205,0.16)';
+    for (let i = 0; i < 44; i++) { const r = 6 + Math.random() * 24; x.beginPath(); x.arc(Math.random() * 256, Math.random() * 256, r, 0, 7); x.fill(); }
+    x.fillStyle = 'rgba(255,255,255,0.85)';
+    for (let i = 0; i < 120; i++) x.fillRect(Math.random() * 256, Math.random() * 256, 1.5, 1.5);
+    t.repeat.set(9, 9); return t;
+  }
+  if (kind === 'jungle') {                                 // SELVA: tierra y hierba
+    x.fillStyle = '#3a4a2a'; x.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 80; i++) { x.fillStyle = `rgba(${50 + Math.random() * 40 | 0},${70 + Math.random() * 55 | 0},${38 + Math.random() * 30 | 0},0.5)`; const r = 8 + Math.random() * 28; x.beginPath(); x.arc(Math.random() * 256, Math.random() * 256, r, 0, 7); x.fill(); }
+    x.fillStyle = 'rgba(18,28,12,0.4)';
+    for (let i = 0; i < 130; i++) x.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
+    t.repeat.set(11, 11); return t;
+  }
+  if (kind === 'lava') {                                   // LAVA: roca con vetas incandescentes
+    x.fillStyle = '#241712'; x.fillRect(0, 0, 256, 256);
+    x.strokeStyle = 'rgba(0,0,0,0.5)'; x.lineWidth = 3;
+    for (let i = 0; i < 18; i++) { x.beginPath(); x.moveTo(Math.random() * 256, Math.random() * 256); x.lineTo(Math.random() * 256, Math.random() * 256); x.stroke(); }
+    x.strokeStyle = 'rgba(255,95,32,0.85)'; x.lineWidth = 2;
+    for (let i = 0; i < 8; i++) { let px = Math.random() * 256, py = Math.random() * 256; x.beginPath(); x.moveTo(px, py); for (let k = 0; k < 5; k++) { px += (Math.random() - 0.5) * 64; py += (Math.random() - 0.5) * 64; x.lineTo(px, py); } x.stroke(); }
+    x.fillStyle = 'rgba(255,150,60,0.25)';
+    for (let i = 0; i < 50; i++) x.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
+    t.repeat.set(8, 8); return t;
+  }
+  // TECH / CIUDAD: rejilla sci-fi
   x.fillStyle = '#2b3440'; x.fillRect(0, 0, 256, 256);
   // paneles principales (rejilla de 64)
   x.strokeStyle = '#3d4d5e'; x.lineWidth = 4;
@@ -367,9 +430,7 @@ function makeFloorTexture() {
   // grano sutil
   x.fillStyle = 'rgba(255,255,255,0.028)';
   for (let i = 0; i < 90; i++) x.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
-  const t = new THREE.CanvasTexture(cv);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(14, 14); t.anisotropy = 4;
-  return t;
+  t.repeat.set(14, 14); return t;
 }
 function makeCrateTexture() {
   const cv = document.createElement('canvas'); cv.width = cv.height = 128;
@@ -403,13 +464,112 @@ function disposeGroup(grp) {
     if (o.material) { Array.isArray(o.material) ? o.material.forEach(m => m.dispose()) : o.material.dispose(); }
   });
 }
+
+// ============================================================================
+//  Decoración por bioma (horizonte + props sueltos) y forma del terreno
+// ============================================================================
+function biomeKind(theme) {
+  return theme === 'desierto' ? 'sand'
+    : theme === 'nieve' ? 'snow'
+    : theme === 'selva' ? 'jungle'
+    : theme === 'lava' ? 'lava'
+    : theme === 'ciudad' ? 'city'
+    : 'tech';
+}
+// Posiciones de escenografía SIEMPRE fuera del límite jugable (círculo o cuadrado), nunca dentro.
+function sceneryPositions(round, half, n, minOff, maxOff) {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const off = minOff + Math.random() * (maxOff - minOff);
+    if (round) { const a = Math.random() * Math.PI * 2, r = half + off; out.push([Math.cos(a) * r, Math.sin(a) * r]); }
+    else {
+      const t = (Math.random() * 2 - 1) * (half + off), s = i & 3;
+      if (s === 0) out.push([t, half + off]); else if (s === 1) out.push([t, -half - off]);
+      else if (s === 2) out.push([half + off, t]); else out.push([-half - off, t]);
+    }
+  }
+  return out;
+}
+// Un prop decorativo (sin colisión) según el bioma.
+function makeProp(kind) {
+  const g = new THREE.Group();
+  const mat = (c, e, ei) => new THREE.MeshStandardMaterial({ color: c, roughness: 1, emissive: e || 0x000000, emissiveIntensity: ei || 0 });
+  const cyl = (rt, rb, h, seg, m) => new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), m);
+  if (kind === 'sand') {
+    if (Math.random() < 0.5) {                              // cactus
+      const c = mat(0x4f7a3a); const body = cyl(0.5, 0.55, 3.6, 8, c); body.position.y = 1.8; g.add(body);
+      for (const sx of [-1, 1]) if (Math.random() < 0.7) {
+        const arm = cyl(0.3, 0.32, 1.5, 6, c); arm.position.set(sx * 0.55, 2.1 + Math.random() * 0.5, 0); arm.rotation.z = sx * 0.95; g.add(arm);
+        const up = cyl(0.28, 0.3, 0.9, 6, c); up.position.set(sx * 1.0, 2.7 + Math.random() * 0.5, 0); g.add(up);
+      }
+    } else {                                                // roca de arenisca (mesa)
+      const h = 2 + Math.random() * 3; const rock = cyl(1.5, 2.2, h, 6, mat(0x9a7a4a)); rock.position.y = h / 2; g.add(rock);
+    }
+  } else if (kind === 'snow') {
+    if (Math.random() < 0.6) {                              // pino nevado
+      const trunk = cyl(0.22, 0.3, 1.4, 6, mat(0x5a4632)); trunk.position.y = 0.7; g.add(trunk);
+      const fc = mat(0xe9f3f8);
+      for (let k = 0; k < 3; k++) { const cone = new THREE.Mesh(new THREE.ConeGeometry(1.9 - k * 0.5, 1.6, 7), fc); cone.position.y = 1.5 + k * 1.0; g.add(cone); }
+    } else {                                                // pico de hielo
+      const h = 3 + Math.random() * 4; const spike = new THREE.Mesh(new THREE.ConeGeometry(0.7, h, 6),
+        new THREE.MeshStandardMaterial({ color: 0xbfe6ff, roughness: 0.3, metalness: 0.1, transparent: true, opacity: 0.85, emissive: 0x2a5a7a, emissiveIntensity: 0.3 }));
+      spike.position.y = h / 2; g.add(spike);
+    }
+  } else if (kind === 'jungle') {                          // árbol frondoso
+    const trunk = cyl(0.3, 0.45, 3.6, 7, mat(0x4a3826)); trunk.position.y = 1.8; g.add(trunk);
+    const fc = mat(0x2f6a2a);
+    for (let k = 0; k < 3; k++) { const blob = new THREE.Mesh(new THREE.IcosahedronGeometry(1.5 + Math.random() * 0.8, 0), fc); blob.position.set((Math.random() - 0.5) * 1.6, 3.6 + Math.random() * 1.4, (Math.random() - 0.5) * 1.6); g.add(blob); }
+  } else if (kind === 'lava') {                            // roca volcánica + veta
+    const h = 1.4 + Math.random() * 2.6; const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(1.2 + Math.random(), 0), mat(0x2a1d18, 0x401005, 0.25)); rock.position.y = h * 0.4; rock.scale.y = 1 + Math.random() * 0.8; g.add(rock);
+    if (Math.random() < 0.55) { const glow = new THREE.Mesh(new THREE.CircleGeometry(1.7, 16), new THREE.MeshBasicMaterial({ color: 0xff5a2a, transparent: true, opacity: 0.5, depthWrite: false })); glow.rotation.x = -Math.PI / 2; glow.position.y = 0.05; g.add(glow); }
+  } else if (kind === 'city') {                            // edificio
+    const bw = 3 + Math.random() * 3, bh = 8 + Math.random() * 18; const b = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bw), new THREE.MeshStandardMaterial({ color: 0x2c3543, roughness: 1, emissive: 0x2a3c54, emissiveIntensity: 0.4 })); b.position.y = bh / 2; g.add(b);
+  } else {                                                  // tech: pilar con anillo
+    const h = 2 + Math.random() * 2; const p = cyl(0.5, 0.6, h, 8, mat(0x47505e)); p.position.y = h / 2; g.add(p);
+    const top = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.08, 6, 16), new THREE.MeshStandardMaterial({ color: 0x33d6ff, emissive: 0x33d6ff, emissiveIntensity: 0.8 })); top.rotation.x = Math.PI / 2; top.position.y = h; g.add(top);
+  }
+  g.rotation.y = Math.random() * Math.PI * 2; g.scale.multiplyScalar(0.85 + Math.random() * 0.5);
+  g.traverse(o => { if (o.isMesh) o.castShadow = false; });
+  return g;
+}
+// Silueta de horizonte fusionada (1 malla), distinta por bioma.
+function buildHorizon(kind, half, B, flat) {
+  const geos = [];
+  const N = Math.round((isMobile ? 40 : 66) * (flat ? 0.5 : 1));
+  for (let i = 0; i < N; i++) {
+    const ang = (i / N) * Math.PI * 2 + (Math.random() - 0.5) * 0.08, rad = half + 18 + Math.random() * 70, hMul = flat ? 0.5 : 1;
+    let geo;
+    if (kind === 'snow' || kind === 'lava') { const ch = (20 + Math.random() * 46) * hMul, cr = 9 + Math.random() * 15; geo = new THREE.ConeGeometry(cr, ch, 5); geo.translate(Math.cos(ang) * rad, ch / 2, Math.sin(ang) * rad); }
+    else if (kind === 'jungle') { const ch = (16 + Math.random() * 26) * hMul, cr = 8 + Math.random() * 12; geo = new THREE.ConeGeometry(cr, ch, 7); geo.translate(Math.cos(ang) * rad, ch / 2 + 2, Math.sin(ang) * rad); }
+    else if (kind === 'sand') { const w = 12 + Math.random() * 18, bh = (8 + Math.random() * 18) * hMul; geo = new THREE.BoxGeometry(w, bh, w); geo.translate(Math.cos(ang) * rad, bh / 2, Math.sin(ang) * rad); }
+    else { const bw = 6 + Math.random() * 12, bh = (12 + Math.random() * 50) * hMul; geo = new THREE.BoxGeometry(bw, bh, bw); geo.translate(Math.cos(ang) * rad, bh / 2, Math.sin(ang) * rad); }
+    geos.push(geo);
+  }
+  const col = kind === 'sand' ? 0x8f7044 : kind === 'snow' ? 0xb9c7d4 : kind === 'jungle' ? 0x274a26 : kind === 'lava' ? 0x361a13 : kind === 'city' ? 0x2c3543 : (B.wall || 0x2c3543);
+  const emi = kind === 'lava' ? 0x401005 : kind === 'city' ? 0x223044 : 0x141d2a;
+  return new THREE.Mesh(mergeGeometries(geos), new THREE.MeshStandardMaterial({ color: col, roughness: 1, emissive: emi, emissiveIntensity: kind === 'city' ? 0.5 : 0.32 }));
+}
+// Monta horizonte + props del bioma alrededor del mapa.
+function buildScenery(theme, half, round, flat, add) {
+  const kind = biomeKind(theme), B = BIOMES[theme] || BIOMES.arena;
+  add(buildHorizon(kind, half, B, flat));
+  if (flat) return;                                        // terreno llano: sin props cercanos
+  const n = isMobile ? 12 : 24;
+  for (const [x, z] of sceneryPositions(round, half, n, 1.5, 18)) { const p = makeProp(kind); p.position.set(x, 0, z); add(p); }
+}
 function buildWorld(map) {
   const size = map.size, half = size / 2;
   obstacles = map.obstacles;
   const theme = map.theme || 'arena';
-  const accent = theme === 'frente' ? 0xff7a3c : theme === 'duelo' ? 0xff4d6d : theme === 'coliseo' ? 0xffc24d : theme === 'tormenta' ? 0xb06bff : theme === 'arsenal' ? 0x7ed957 : 0x33d6ff;  // color neón por mapa
-  const accent2 = theme === 'frente' ? 0xffb37a : theme === 'duelo' ? 0xff8aa0 : theme === 'coliseo' ? 0xffe0a0 : theme === 'tormenta' ? 0xd6b3ff : theme === 'arsenal' ? 0xb6f09a : 0x6fe6ff;
-  const floorCol = theme === 'frente' ? 0x4a3a30 : theme === 'duelo' ? 0x33303c : theme === 'coliseo' ? 0x4a4030 : theme === 'tormenta' ? 0x2f3140 : theme === 'arsenal' ? 0x34392c : 0x394452;
+  mapRound = !!map.round;                                 // forma del terreno (redondo/cuadrado)
+  mapDecor = map.decor || null;                           // estilo de decoración ('flat' = llano)
+  const flat = mapDecor === 'flat';
+  const B = BIOMES[theme] || BIOMES.arena;               // bioma (color/niebla/cielo)
+  const accent = B.accent, accent2 = B.accent2, floorCol = B.floor;
+  // niebla y cielo del bioma (en móvil, niebla un poco más corta)
+  scene.fog = new THREE.Fog(B.fog[2], isMobile ? B.fog[0] * 0.9 : B.fog[0], isMobile ? B.fog[1] * 0.92 : B.fog[1]);
+  if (scene.background && scene.background.dispose) scene.background.dispose();
+  scene.background = makeGradientSky(B.sky);
 
   // ---- limpiar el mundo anterior (cambio de mapa) ----
   if (worldGroup) { scene.remove(worldGroup); disposeGroup(worldGroup); }
@@ -422,23 +582,19 @@ function buildWorld(map) {
   AMMO_CRATES = map.ammocrates || AMMO_CRATES;
   const add = (o) => worldGroup.add(o);
 
-  // ---- suelo texturizado ----
-  const floorMat = new THREE.MeshStandardMaterial({ map: makeFloorTexture(), roughness: .95 });
-  floorMat.color.setHex(floorCol);
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(size, size), floorMat);
+  // ---- suelo texturizado (forma según terreno; biomas naturales con color propio) ----
+  const fk = biomeKind(theme), natural = (fk === 'sand' || fk === 'snow' || fk === 'jungle' || fk === 'lava');
+  const floorMat = new THREE.MeshStandardMaterial({ map: makeFloorTexture(theme), roughness: .95 });
+  floorMat.color.setHex(natural ? 0xffffff : floorCol);
+  const floor = new THREE.Mesh(mapRound ? new THREE.CircleGeometry(half, 80) : new THREE.PlaneGeometry(size, size), floorMat);
   floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; add(floor); worldColliders.push(floor);
+  // tierra exterior oscura (sostiene la escenografía y evita el vacío más allá del muro)
+  const skirtMat = new THREE.MeshStandardMaterial({ color: floorCol, roughness: 1 }); skirtMat.color.multiplyScalar(0.5);
+  const skirt = new THREE.Mesh(mapRound ? new THREE.CircleGeometry(half * 2.6, 64) : new THREE.PlaneGeometry(size * 2.6, size * 2.6), skirtMat);
+  skirt.rotation.x = -Math.PI / 2; skirt.position.y = -0.15; add(skirt);
 
-  // ---- horizonte de edificios lejanos (fusionado en 1 sola malla) ----
-  const cityGeos = [];
-  for (let i = 0; i < 70; i++) {
-    const ang = (i / 70) * Math.PI * 2 + Math.random() * 0.06;
-    const rad = half + 22 + Math.random() * 70, bh = 12 + Math.random() * 52, bw = 6 + Math.random() * 12;
-    const geo = new THREE.BoxGeometry(bw, bh, bw);
-    geo.translate(Math.cos(ang) * rad, bh / 2, Math.sin(ang) * rad);
-    cityGeos.push(geo);
-  }
-  add(new THREE.Mesh(mergeGeometries(cityGeos),
-    new THREE.MeshStandardMaterial({ color: 0x2c3543, roughness: 1, emissive: 0x141d2a, emissiveIntensity: .35 })));
+  // ---- horizonte + escenografía del bioma (silueta lejana + props sueltos) ----
+  buildScenery(theme, half, mapRound, flat, add);
 
   // ---- aro central + emblema flotante ----
   const ring = new THREE.Mesh(new THREE.RingGeometry(7.6, 8.4, 56),
@@ -477,7 +633,7 @@ function buildWorld(map) {
   powerMesh.position.set(0, 7.0, 0); add(powerMesh);
 
   // ---- muro de la tormenta (Battle Royale): cilindro que se cierra hacia el centro ----
-  if (theme === 'tormenta') {
+  if (map.storm) {
     const sg = new THREE.CylinderGeometry(1, 1, 80, 56, 1, true);
     stormMesh = new THREE.Mesh(sg, new THREE.MeshBasicMaterial({ color: 0xb06bff, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }));
     stormMesh.position.y = 35; stormMesh.visible = false; add(stormMesh);
@@ -501,17 +657,26 @@ function buildWorld(map) {
   for (let i = 0; i < dustN; i++) { dustPos[i * 3] = Math.random() * 100 - 50; dustPos[i * 3 + 1] = Math.random() * 22; dustPos[i * 3 + 2] = Math.random() * 100 - 50; }
   const dustGeo = new THREE.BufferGeometry();
   dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
-  dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ color: 0xbcd6ee, size: 0.08, transparent: true, opacity: 0.35, depthWrite: false }));
+  dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ color: B.dust, size: 0.08, transparent: true, opacity: 0.35, depthWrite: false }));
   add(dust);
 
-  // ---- muros perimetrales con franja luminosa ----
-  const wallMat = new THREE.MeshStandardMaterial({ color: theme === 'frente' ? 0x4a4038 : theme === 'duelo' ? 0x3a3340 : theme === 'coliseo' ? 0x5b5040 : theme === 'tormenta' ? 0x3c3b4a : theme === 'arsenal' ? 0x46493a : 0x38424f, roughness: .85 });
+  // ---- muros perimetrales con franja luminosa (anillo si el terreno es redondo) ----
+  const wallMat = new THREE.MeshStandardMaterial({ color: B.wall, roughness: .85 });
   const h = 8, t = 2;
-  for (const [wx, wz, ww, wd] of [[0, half, size, t], [0, -half, size, t], [half, 0, t, size], [-half, 0, t, size]]) {
-    addBox(wx, h / 2, wz, ww, h, wd, wallMat);
-    const trim = new THREE.Mesh(new THREE.BoxGeometry(ww + 0.05, 0.28, wd + 0.05),
+  if (mapRound) {
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(half + t / 2, half + t / 2, h, 80, 1, true),
+      new THREE.MeshStandardMaterial({ color: B.wall, roughness: .85, side: THREE.DoubleSide }));
+    ring.position.y = h / 2; add(ring);
+    const trim = new THREE.Mesh(new THREE.TorusGeometry(half + t / 2, 0.18, 8, 90),
       new THREE.MeshStandardMaterial({ color: accent, emissive: accent, emissiveIntensity: .85 }));
-    trim.position.set(wx, h - 0.7, wz); add(trim);
+    trim.rotation.x = Math.PI / 2; trim.position.y = h - 0.7; add(trim);
+  } else {
+    for (const [wx, wz, ww, wd] of [[0, half, size, t], [0, -half, size, t], [half, 0, t, size], [-half, 0, t, size]]) {
+      addBox(wx, h / 2, wz, ww, h, wd, wallMat);
+      const trim = new THREE.Mesh(new THREE.BoxGeometry(ww + 0.05, 0.28, wd + 0.05),
+        new THREE.MeshStandardMaterial({ color: accent, emissive: accent, emissiveIntensity: .85 }));
+      trim.position.set(wx, h - 0.7, wz); add(trim);
+    }
   }
 
   // ---- obstáculos diferenciados ----
@@ -1451,6 +1616,7 @@ function drawMinimap() {
   const c = miniCtx;
   c.clearRect(0, 0, S, S);
   c.fillStyle = 'rgba(10,16,24,0.7)'; c.fillRect(0, 0, S, S);
+  if (mapRound) { c.strokeStyle = 'rgba(150,180,210,0.5)'; c.lineWidth = 1.5; c.beginPath(); c.arc(S / 2, S / 2, (mapHalf - 1) * sc, 0, 7); c.stroke(); }
   c.fillStyle = 'rgba(120,140,165,0.55)';
   for (const o of obstacles) c.fillRect(X(o.x - o.w / 2), Z(o.z - o.d / 2), o.w * sc, o.d * sc);
   for (const [, m] of pickupMeshes) {
@@ -1596,8 +1762,13 @@ function updatePlayer(dt) {
 
   const r = resolveCollision(local.x, local.z, 0.5, local.feetY);
   const lim = mapHalf - 1;
-  local.x = Math.max(-lim, Math.min(lim, r.x));
-  local.z = Math.max(-lim, Math.min(lim, r.z));
+  if (mapRound) {                                          // terreno redondo: recorte radial
+    const d = Math.hypot(r.x, r.z);
+    if (d > lim) { local.x = r.x / d * lim; local.z = r.z / d * lim; } else { local.x = r.x; local.z = r.z; }
+  } else {
+    local.x = Math.max(-lim, Math.min(lim, r.x));
+    local.z = Math.max(-lim, Math.min(lim, r.z));
+  }
 
   const wasOnGround = local.onGround;
   const prevFeet = local.feetY;
